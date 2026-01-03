@@ -1,0 +1,23 @@
+[package]
+name = "ghostptr"
+version = "0.1.0"
+edition = "2024"
+
+description = "Lightweight, ergonomic library for Windows procession interaction. "
+readme = "README.md"
+repository = "https://github.com/hi2ryan/ghostptr"
+license = "MIT"
+authors = ["hi2ryan"]
+keywords = ["os", "memory", "hacking", "process"]
+categories = ["os"]
+
+[lib]
+path = "src/lib.rs"
+
+[workspace]
+members = [
+	"examples/*"
+]
+
+[dependencies]
+bitflags = "2.10.0"
