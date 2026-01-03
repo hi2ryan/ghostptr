@@ -1,4 +1,5 @@
 #[cfg(not(all(windows, target_arch = "x86_64")))]
+#[cfg(not(docsrs))]
 compile_error!("ghostptr only works for win64 atm");
 
 /*
