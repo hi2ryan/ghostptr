@@ -2,7 +2,8 @@ use bitflags::bitflags;
 
 bitflags! {
     /// Represents process access rights.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+    #[repr(transparent)]
+	#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
     pub struct ProcessAccess: u32 {
         const TERMINATE                	= 0x0001;
         const CREATE_THREAD            	= 0x0002;
@@ -23,7 +24,8 @@ bitflags! {
 
     /// Represents memory protection.
     /// These values determine how interactions with the memory are allowed to proceed.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+    #[repr(transparent)]
+	#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
     pub struct MemoryProtection: u32 {
         /// Disables all access to the committed region of pages.
         const NOACCESS               = 0x01;
@@ -67,7 +69,8 @@ bitflags! {
 
     /// Represents memory state flags.
     /// These values indicate whether a region of pages is committed, reserved, or free.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+    #[repr(transparent)]
+	#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
     pub struct MemoryState: u32 {
         /// Indicates committed pages for which physical storage has been allocated.
         const COMMIT  = 0x1000;
@@ -81,7 +84,8 @@ bitflags! {
 
     /// Represents memory type flags.
     /// These values describe how the memory was allocated.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+    #[repr(transparent)]
+	#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
     pub struct MemoryType: u32 {
         /// Indicates that the memory pages are mapped into the view of an image section.
         const IMAGE   = 0x1000000;
@@ -94,7 +98,8 @@ bitflags! {
     }
 
     /// Represents memory allocation type flags.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+    #[repr(transparent)]
+	#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
     pub struct AllocationType: u32 {
         /// Allocates memory charges (commit) from the paging file.
         const COMMIT = 0x00001000;
@@ -131,14 +136,16 @@ bitflags! {
     }
 
     /// Represents free operation type flags.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+    #[repr(transparent)]
+	#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
     pub struct FreeType: u32 {
         const DECOMMIT = 0x00004000;
         const RELEASE  = 0x00008000;
     }
 
     /// Represents thread access rights.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+    #[repr(transparent)]
+	#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
     pub struct ThreadAccess: u32 {
         const TERMINATE                     = 0x0001;
         const SUSPEND_RESUME                = 0x0002;
@@ -156,6 +163,7 @@ bitflags! {
     }
 
     /// Flags controlling which parts of a thread CONTEXT are read or written.
+	#[repr(transparent)]
     #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
     pub struct ThreadContextFlags: u32 {
         /// Indicates that this is an AMD64 (x86‑64) ThreadContext structure.
@@ -212,9 +220,51 @@ bitflags! {
     }
 
 	/// Flags controlling how a thread acts upon creation.
+	#[repr(transparent)]
     #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 	pub struct ThreadCreateFlags: u32 {
 		const NONE = 0;
 		const CREATE_SUSPENDED = 0x4;
 	}
+	
+    #[repr(transparent)]
+	#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+    pub struct SectionCharacteristics: u32 {
+        const TYPE_NO_PAD                    = 0x00000008;
+        const CNT_CODE                       = 0x00000020;
+        const CNT_INITIALIZED_DATA           = 0x00000040;
+        const CNT_UNINITIALIZED_DATA         = 0x00000080;
+        const LNK_OTHER                      = 0x00000100;
+        const LNK_INFO                       = 0x00000200;
+        const LNK_REMOVE                     = 0x00000800;
+        const LNK_COMDAT                     = 0x00001000;
+        const GPREL                          = 0x00008000;
+        const MEM_PURGEABLE                  = 0x00020000;
+        const MEM_16BIT                      = 0x00020000;
+        const MEM_LOCKED                     = 0x00040000;
+        const MEM_PRELOAD                    = 0x00080000;
+        const ALIGN_1BYTES                   = 0x00100000;
+        const ALIGN_2BYTES                   = 0x00200000;
+        const ALIGN_4BYTES                   = 0x00300000;
+        const ALIGN_8BYTES                   = 0x00400000;
+        const ALIGN_16BYTES                  = 0x00500000;
+        const ALIGN_32BYTES                  = 0x00600000;
+        const ALIGN_64BYTES                  = 0x00700000;
+        const ALIGN_128BYTES                 = 0x00800000;
+        const ALIGN_256BYTES                 = 0x00900000;
+        const ALIGN_512BYTES                 = 0x00A00000;
+        const ALIGN_1024BYTES                = 0x00B00000;
+        const ALIGN_2048BYTES                = 0x00C00000;
+        const ALIGN_4096BYTES                = 0x00D00000;
+        const ALIGN_8192BYTES                = 0x00E00000;
+        const LNK_NRELOC_OVFL                = 0x01000000;
+        const MEM_DISCARDABLE                = 0x02000000;
+        const MEM_NOT_CACHED                 = 0x04000000;
+        const MEM_NOT_PAGED                  = 0x08000000;
+        const MEM_SHARED                     = 0x10000000;
+        const MEM_EXECUTE                    = 0x20000000;
+        const MEM_READ                       = 0x40000000;
+        const MEM_WRITE                      = 0x80000000;
+    }
+
 }

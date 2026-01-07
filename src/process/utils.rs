@@ -1,5 +1,7 @@
 use crate::{
-    HandleObject, ProcessError, Result, process::{FreeType, MemoryProtection, MemoryState, MemoryType, Process}, windows::{
+    HandleObject, ProcessError, Result,
+    process::{FreeType, MemoryProtection, MemoryState, MemoryType, Process},
+    windows::{
         Handle,
         constants::{CURRENT_PROCESS_HANDLE, STATUS_INFO_LENGTH_MISMATCH},
         structs::{
@@ -7,10 +9,14 @@ use crate::{
         },
         utils::unicode_to_string,
         wrappers::{nt_duplicate_object, nt_query_object},
-    }
+    },
 };
 
-
+#[derive(Debug, Clone, Copy)]
+pub struct AddressRange {
+    pub start: usize,
+    pub size: usize,
+}
 
 #[derive(Debug, Clone)]
 pub struct MemoryInfo {
@@ -22,6 +28,31 @@ pub struct MemoryInfo {
     pub state: MemoryState,
     pub protection: MemoryProtection,
     pub r#type: MemoryType,
+}
+
+impl MemoryInfo {
+    #[inline]
+    pub fn is_readable(&self) -> bool {
+        if self.state != MemoryState::COMMIT {
+            return false;
+        }
+
+        let protection = self.protection;
+        if protection.contains(MemoryProtection::NOACCESS)
+            || protection.contains(MemoryProtection::GUARD)
+        {
+            return false;
+        }
+
+        protection.intersects(
+            MemoryProtection::READONLY
+                | MemoryProtection::READWRITE
+                | MemoryProtection::WRITECOPY
+                | MemoryProtection::EXECUTE_READ
+                | MemoryProtection::EXECUTE_READWRITE
+                | MemoryProtection::EXECUTE_WRITECOPY,
+        )
+    }
 }
 
 impl From<MemoryBasicInformation> for MemoryInfo {
@@ -180,9 +211,9 @@ impl<'a, P: Process> ProcessHandleInfo<'a, P> {
 }
 
 impl<'a, P: Process> Into<HandleObject> for ProcessHandleInfo<'a, P> {
-	fn into(self) -> HandleObject {
-		HandleObject::from_handle(self.handle)
-	}
+    fn into(self) -> HandleObject {
+        HandleObject::from_handle(self.handle)
+    }
 }
 
 /// Represents an allocated region in a process' memory.

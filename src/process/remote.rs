@@ -7,10 +7,10 @@ use crate::{
         thread::ThreadView,
     },
     process::{
-        AllocationType, FreeType, MemoryProtection, Process,
+        AllocationType, FreeType, MemoryProtection, Process, Scanner,
         module::Module,
         thread::Thread,
-        utils::{MemoryInfo, MemoryRegion, ProcessHandleInfo},
+        utils::{AddressRange, MemoryInfo, MemoryRegion, ProcessHandleInfo},
     },
     windows::{
         Handle, NtStatus,
@@ -230,16 +230,16 @@ impl RemoteProcess {
 }
 
 impl Process for RemoteProcess {
-	/// Returns the underlying process handle.
-	/// 
-	/// # Safety
-	/// The handle will be closed as soon as the `RemoteProcess` struct is dropped.
+    /// Returns the underlying process handle.
+    ///
+    /// # Safety
+    /// The handle will be closed as soon as the `RemoteProcess` struct is dropped.
     #[inline(always)]
     unsafe fn handle(&self) -> Handle {
         self.0
     }
 
-	/// Terminates the process.
+    /// Terminates the process.
     ///
     /// # Access Rights
     ///
@@ -262,7 +262,7 @@ impl Process for RemoteProcess {
         Ok(())
     }
 
-	/// Lists the threads within the process.
+    /// Lists the threads within the process.
     ///
     /// # Access Rights
     ///
@@ -287,7 +287,7 @@ impl Process for RemoteProcess {
         Ok(process.threads)
     }
 
-	/// Creates a thread in the process.
+    /// Creates a thread in the process.
     ///
     /// # Access Rights
     ///
@@ -332,8 +332,8 @@ impl Process for RemoteProcess {
         }
     }
 
-	/// Enumerates the modules within the process and finds the
-	/// first loaded module (the main module)
+    /// Enumerates the modules within the process and finds the
+    /// first loaded module (the main module)
     ///
     /// # Access Rights
     ///
@@ -354,11 +354,11 @@ impl Process for RemoteProcess {
     fn main_module(&self) -> Result<Module<Self>> {
         self.modules(ModuleIterOrder::Load)?
             .next()
-            .ok_or(ProcessError::ModuleNotFound)
+            .ok_or(ProcessError::MainModuleNotFound)
     }
 
-	/// Enumerates the modules within the process and finds
-	/// a module matching the `name` provided.
+    /// Enumerates the modules within the process and finds
+    /// a module matching the `name` provided.
     ///
     /// # Access Rights
     ///
@@ -375,14 +375,14 @@ impl Process for RemoteProcess {
     ///
     /// Returns [`crate::ProcessError::NtStatus`] if the module enumeration fails,
     /// potentially due to insufficient access rights.
-	#[inline]
-	fn get_module(&self, name: &str) -> Result<Module<Self>> {
-		self.modules(ModuleIterOrder::Load)?
+    #[inline]
+    fn get_module(&self, name: &str) -> Result<Module<Self>> {
+        self.modules(ModuleIterOrder::Load)?
             .find(|m| m.name == name)
-            .ok_or(ProcessError::ModuleNotFound)
-	}
+            .ok_or(ProcessError::ModuleNotFound(name.to_string()))
+    }
 
-	/// Lists the modules within the process.
+    /// Lists the modules within the process.
     ///
     /// # Access Rights
     ///
@@ -402,14 +402,14 @@ impl Process for RemoteProcess {
     #[inline]
     fn modules(&self, order: ModuleIterOrder) -> Result<ModuleIterator<RemoteProcess>> {
         ModuleIterator::new(&self, order)
-	}
+    }
 
     /// Reads a value of type `T` from the process's memory.
     ///
-	/// This method copies `size_of::<T>()` bytes from the target process
+    /// This method copies `size_of::<T>()` bytes from the target process
     /// into a local `T`. The address may be provided as
     /// any type implementing [`Address<T>`], such as a raw pointer or integer address.
-	/// 
+    ///
     /// # Access Rights
     ///
     /// This method requires the process handle access mask to include:
@@ -423,8 +423,8 @@ impl Process for RemoteProcess {
     ///
     /// Returns [`crate::ProcessError::NtStatus`] if reading the memory fails,
     /// potentially due to insufficient access rights.
-	/// 
-	/// # Example
+    ///
+    /// # Example
     ///
     /// ```rust
     /// let value: u32 = process.read_mem(0x7FF6_1234_5678)?;
@@ -453,12 +453,12 @@ impl Process for RemoteProcess {
         Ok(unsafe { value.assume_init() })
     }
 
-	/// Reads a slice of type `T` from the process's memory.
+    /// Reads a slice of type `T` from the process's memory.
     ///
-	/// This method copies `size_of::<T>() * len` bytes from the target process
+    /// This method copies `size_of::<T>() * len` bytes from the target process
     /// into a local `Vec<T>`. The address may be provided as
     /// any type implementing [`Address<T>`], such as a raw pointer or integer address.
-	/// 
+    ///
     /// # Access Rights
     ///
     /// This method requires the process handle access mask to include:
@@ -503,9 +503,9 @@ impl Process for RemoteProcess {
         Ok(slice)
     }
 
-	/// Reads a C string from the process' memory, continuing reading
-	/// memory until it finds a null terminator.
-	/// 
+    /// Reads a C string from the process' memory, continuing reading
+    /// memory until it finds a null terminator.
+    ///
     /// # Access Rights
     ///
     /// This method requires the process handle access mask to include:
@@ -519,20 +519,38 @@ impl Process for RemoteProcess {
     ///
     /// Returns [`crate::ProcessError::NtStatus`] if reading the memory fails,
     /// potentially due to insufficient access rights.
-	/// 
-	/// # Safety
-	/// 
-	/// The caller must ensure that the memory read is a proper c string
-	/// with a null terminator. This method will continue reading memory
-	/// until it finds a null terminator.
-    fn read_c_string<A: Address<u8>>(&self, address: A) -> Result<String> {
-        let mut buffer: Vec<u8> = Vec::new();
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure that the memory read is a proper c string
+    /// with a null terminator. This method will continue reading memory
+    /// until it finds a null terminator.
+    fn read_c_string<A: Address<u8>>(&self, address: A, len: Option<usize>) -> Result<String> {
+        let max_len;
+        let mut buffer;
+        if let Some(len) = len {
+            max_len = len;
+            buffer = Vec::with_capacity(len);
+        } else {
+            max_len = usize::MAX;
+            buffer = Vec::new();
+        }
+
+		
+
         let mut offset = 0;
         let base_address = address.into_ptr() as usize;
 
         loop {
+            // stop if we've already reached the max length
+            if buffer.len() >= max_len {
+                break;
+            }
+
             let mut chunk = [0u8; 64];
             let mut bytes_read = 0;
+
+			println!("{:?}", self.query_mem(base_address + offset));
 
             let status = nt_read_virtual_memory(
                 self.0,
@@ -550,26 +568,37 @@ impl Process for RemoteProcess {
                 return Err(ProcessError::PartialRead(0));
             }
 
-            // find the null terminator
-            if let Some(pos) = chunk[..bytes_read].iter().position(|&b| b == 0) {
-                buffer.extend_from_slice(&chunk[..pos]);
+            let bytes = &chunk[..bytes_read];
+
+            // check for null terminator
+            if let Some(pos) = bytes.iter().position(|&b| b == 0) {
+                let take = pos.min(max_len - buffer.len());
+                buffer.extend_from_slice(&bytes[..take]);
                 break;
-            } else {
-                // null terminator not in this chunk
-                buffer.extend_from_slice(&chunk[..bytes_read]);
-                offset += bytes_read;
+            }
+
+            // no null terminator found in this chunk
+            let remaining = max_len - buffer.len();
+            let take = bytes.len().min(remaining);
+
+            buffer.extend_from_slice(&bytes[..take]);
+            offset += take;
+
+            if take < bytes.len() {
+                // we hit max_len
+                break;
             }
         }
 
         Ok(String::from_utf8_lossy(&buffer).into_owned())
     }
 
-	/// Writes a value of type `T` to the process's memory
-	/// 
-	/// This method copies `size_of::<T>()` bytes to the address in the
-	/// target process's memory. The address may be provided as
+    /// Writes a value of type `T` to the process's memory
+    ///
+    /// This method copies `size_of::<T>()` bytes to the address in the
+    /// target process's memory. The address may be provided as
     /// any type implementing [`Address<T>`], such as a raw pointer or integer address.
-	/// 
+    ///
     /// # Access Rights
     ///
     /// This method requires the process handle access mask to include:
@@ -605,12 +634,12 @@ impl Process for RemoteProcess {
         Ok(())
     }
 
-	/// Writes a slice of type `T` to the process's memory
-	/// 
-	/// This method copies `size_of::<T>() * value.len()` bytes to the address in the
-	/// target process's memory. The address may be provided as
+    /// Writes a slice of type `T` to the process's memory
+    ///
+    /// This method copies `size_of::<T>() * value.len()` bytes to the address in the
+    /// target process's memory. The address may be provided as
     /// any type implementing [`Address<T>`], such as a raw pointer or integer address.
-	/// 
+    ///
     /// # Access Rights
     ///
     /// This method requires the process handle access mask to include:
@@ -625,7 +654,7 @@ impl Process for RemoteProcess {
     /// Returns [`crate::ProcessError::NtStatus`] if writing the memory fails,
     /// potentially due to insufficient access rights.
     fn write_slice<T, A: Address<T>>(&self, address: A, value: &[T]) -> Result<()> {
-		let mut bytes_written = 0;
+        let mut bytes_written = 0;
         let bytes_to_write = size_of::<T>() * value.len();
 
         let status = nt_write_virtual_memory(
@@ -646,17 +675,17 @@ impl Process for RemoteProcess {
         Ok(())
     }
 
-	/// Queries information about a region of virtual memory in the process.
-	/// 
-	/// The address may be provided as any type implementing [`Address<u8>`],
-	/// such as a raw pointer or integer address.
-	/// 
+    /// Queries information about a region of virtual memory in the process.
+    ///
+    /// The address may be provided as any type implementing [`Address<u8>`],
+    /// such as a raw pointer or integer address.
+    ///
     /// # Access Rights
     ///
     /// This method requires the process handle access mask to include:
     ///
     /// - [`ProcessAccess::VM_READ`], **and**
-	/// - [`ProcessAccess::QUERY_INFORMATION`]
+    /// - [`ProcessAccess::QUERY_INFORMATION`]
     ///
     /// Without this right, the system call will fail with an
     /// `NTSTATUS` error.
@@ -686,11 +715,11 @@ impl Process for RemoteProcess {
     }
 
     /// Changes the protection on a region of virtual memory in the process.
-	/// Returns the region's previous protection.
-	/// 
-	/// The address may be provided as any type implementing [`Address<u8>`],
-	/// such as a raw pointer or integer address.
-	/// 
+    /// Returns the region's previous protection.
+    ///
+    /// The address may be provided as any type implementing [`Address<u8>`],
+    /// such as a raw pointer or integer address.
+    ///
     /// # Access Rights
     ///
     /// This method requires the process handle access mask to include:
@@ -729,12 +758,12 @@ impl Process for RemoteProcess {
         Ok(MemoryProtection::from_bits_retain(prev_protection))
     }
 
-	/// Reserves and/or commits a region of pages within the process's
-	/// virtual memory.
-	/// 
-	/// If `address` is not `None`, the region is allocated at the
-	/// specified virtual address.
-	/// 
+    /// Reserves and/or commits a region of pages within the process's
+    /// virtual memory.
+    ///
+    /// If `address` is not `None`, the region is allocated at the
+    /// specified virtual address.
+    ///
     /// # Access Rights
     ///
     /// This method requires the process handle access mask to include:
@@ -785,11 +814,11 @@ impl Process for RemoteProcess {
         })
     }
 
-	/// Frees allocated virtual memory in the process.
-	/// 
-	/// The address may be provided as any type implementing [`Address<u8>`],
-	/// such as a raw pointer or integer address.
-	/// 
+    /// Frees allocated virtual memory in the process.
+    ///
+    /// The address may be provided as any type implementing [`Address<u8>`],
+    /// such as a raw pointer or integer address.
+    ///
     /// # Access Rights
     ///
     /// This method requires the process handle access mask to include:
@@ -815,6 +844,51 @@ impl Process for RemoteProcess {
         }
         Ok(())
     }
+
+    fn pattern_scan<S: Scanner>(&self, range: AddressRange, pattern: &S) -> Result<Vec<usize>> {
+        let mut results = Vec::new();
+
+        let mut curr_addr = range.start;
+        let end_addr = range.start + range.size;
+
+        loop {
+            if curr_addr > end_addr {
+                break;
+            }
+
+            let info = match self.query_mem(curr_addr) {
+                Ok(info) => info,
+                Err(_) => {
+                    // query failed
+                    // move a page forward
+                    curr_addr += 0x1000;
+                    continue;
+                }
+            };
+
+            if info.region_size == 0 {
+                break;
+            }
+
+            if !info.is_readable() {
+                // skip unreadable region
+                curr_addr += info.region_size;
+                continue;
+            }
+
+            let read_size = info.region_size.min(end_addr - curr_addr);
+
+            if let Ok(region) = self.read_slice::<u8, _>(curr_addr, read_size) {
+                for offset in pattern.scan_bytes(&region) {
+                    results.push(curr_addr + offset);
+                }
+            }
+
+            curr_addr += info.region_size;
+        }
+
+        Ok(results)
+    }
 }
 
 impl Drop for RemoteProcess {
@@ -827,7 +901,7 @@ impl Drop for RemoteProcess {
 #[cfg(test)]
 mod tests {
     use crate::{
-        Result,
+        Pattern32, Result,
         iter::{module::ModuleIterOrder, process::ProcessIterator},
         process::{
             AllocationType, FreeType, MemoryProtection, MemoryState, MemoryType, Process,
@@ -996,6 +1070,61 @@ mod tests {
         let threads = process.threads()?;
 
         assert!(threads.len() > 0, "failed to get remote process threads");
+        Ok(())
+    }
+
+    #[test]
+    fn remote_module_exports() -> Result<()> {
+		let process = RemoteProcess::open_first_named("Discord.exe", ProcessAccess::ALL_ACCESS)?;
+
+        let ntdll = process
+            .modules(ModuleIterOrder::Load)?
+            .skip(1)
+            .next()
+            .expect("failed to get first module of remote process");
+
+        println!("ntdll @ {:#x}", ntdll.base_address);
+
+        ntdll.get_export("NtOpenProcess");
+
+        Ok(())
+    }
+
+    #[test]
+    fn remote_process_pattern_scan() -> Result<()> {
+        let process = RemoteProcess::open_first_named("Discord.exe", ProcessAccess::ALL_ACCESS)?;
+        let ntdll = process
+            .modules(ModuleIterOrder::Load)?
+            .skip(1)
+            .next()
+            .expect("failed to get first module of remote process");
+
+        let nt_open_process_addr = ntdll.get_export("NtOpenProcess")?;
+
+        let ssn = crate::windows::syscalls::syscalls().nt_open_process;
+        let ssn_bytes = ssn
+            .to_le_bytes()
+            .iter()
+            .map(|b| format!("{:02x}", b))
+            .collect::<Vec<_>>()
+            .join(" ");
+
+        let pat = Pattern32::from_ida(&format!(
+            "4c 8b d1 b8 {} f6 04 25 08 03 fe 7f 01 75 ?? 0f 05 c3 cd 2e c3",
+            ssn_bytes
+        ));
+
+        let results = ntdll.pattern_scan(&pat)?;
+        assert!(
+            results.len() == 1,
+            "failed to find match NtOpenProcess syscall pattern"
+        );
+
+        assert_eq!(
+            results[0], nt_open_process_addr,
+            "failed to find match NtOpenProcess syscall pattern"
+        );
+
         Ok(())
     }
 }

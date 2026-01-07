@@ -4,6 +4,7 @@ pub mod module;
 pub mod remote;
 pub mod thread;
 pub mod utils;
+pub mod pattern;
 
 pub use crate::windows::flags::*;
 pub use address::Address;
@@ -12,14 +13,13 @@ pub use module::{Export, Module};
 pub use remote::RemoteProcess;
 pub use thread::Thread;
 pub use utils::{MemoryInfo, MemoryRegion, ProcessHandleInfo};
+pub use pattern::{Scanner, Pattern16, Pattern32};
 
 use crate::{
-    Result,
-    iter::{
+    Result, iter::{
         module::{ModuleIterOrder, ModuleIterator},
         thread::ThreadView,
-    },
-    windows::{Handle, NtStatus},
+    }, process::utils::AddressRange, windows::{Handle, NtStatus}
 };
 
 pub trait Process {
@@ -215,7 +215,7 @@ pub trait Process {
     fn read_slice<T: Copy, A: Address<T>>(&self, address: A, len: usize) -> Result<Vec<T>>;
 
 	/// Reads a C string from the process' memory, continuing reading
-	/// memory until it finds a null terminator.
+	/// memory until it finds a null terminator or reaches `len`.
 	/// 
     /// # Access Rights
     ///
@@ -236,8 +236,8 @@ pub trait Process {
 	/// 
 	/// The caller must ensure that the memory read is a proper c string
 	/// with a null terminator. This method will continue reading memory
-	/// until it finds a null terminator.
-    fn read_c_string<A: Address<u8>>(&self, address: A) -> Result<String>;
+	/// until it finds a null terminator or, if `len` is not `None`, until it reaches `len`.
+    fn read_c_string<A: Address<u8>>(&self, address: A, len: Option<usize>) -> Result<String>;
 
 	/// Writes a value of type `T` to the process's memory
 	/// 
@@ -380,4 +380,6 @@ pub trait Process {
     /// Returns [`crate::ProcessError::NtStatus`] if freeing the memory fails,
     /// potentially due to insufficient access rights.
     fn free_mem<A: Address<u8>>(&self, address: A, size: usize, r#type: FreeType) -> Result<()>;
+
+	fn pattern_scan<S: Scanner>(&self, range: AddressRange, pattern: &S) -> Result<Vec<usize>>;
 }

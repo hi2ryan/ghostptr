@@ -122,6 +122,7 @@ pub struct ImageDataDirectory {
 }
 
 #[repr(C)]
+#[derive(Copy, Clone)]
 pub struct ImageOptionalHeader64 {
     pub magic: u16,
     pub major_linker_version: u8,
@@ -156,6 +157,7 @@ pub struct ImageOptionalHeader64 {
 }
 
 #[repr(C)]
+#[derive(Copy, Clone)]
 pub struct ImageFileHeader {
     pub machine: u16,
     pub number_of_sections: u16,
@@ -167,10 +169,33 @@ pub struct ImageFileHeader {
 }
 
 #[repr(C)]
+#[derive(Copy, Clone)]
 pub struct ImageNtHeaders64 {
     pub signature: u32,
     pub file_header: ImageFileHeader,
     pub optional_header: ImageOptionalHeader64,
+}
+
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub union ImageSectionHeaderMisc {
+    pub physical_address: u32,
+    pub virtual_size: u32,
+}
+
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub struct ImageSectionHeader {
+    pub name: [u8; 8],
+    pub misc: ImageSectionHeaderMisc,
+    pub virtual_address: u32,
+    pub size_of_raw_data: u32,
+    pub pointer_to_raw_data: u32,
+    pub pointer_to_relocations: u32,
+    pub pointer_to_linenumbers: u32,
+    pub number_of_relocations: u16,
+    pub number_of_linenumbers: u16,
+    pub characteristics: u32,
 }
 
 #[repr(C)]

@@ -1,0 +1,505 @@
+use core::arch::x86_64::*;
+
+/// A trait for scanning a byte slice for occurrences of a pattern.
+/// 
+/// Types implementing this trait define how a pattern is represented and
+/// how it is matched against a given haystack.
+pub trait Scanner {
+    /// Scans a slice of bytes (`haystack`) for all non-overlapping matches
+	/// of the underlying pattern.
+	/// 
+	/// # Returns
+	/// 
+	/// A `Vec<usize>` containing the starting offsets (indices into `haystack`)
+	/// where the pattern was found. If no matches are found, the vector is empty.
+    fn scan_bytes(&self, haystack: &[u8]) -> Vec<usize>;
+}
+
+/// A SIMD-accelerated pattern matcher using 128-bit (SSE) chunks.
+/// 
+/// `Pattern16` stores the pattern as a sequence of 16-byte chunks and
+pub struct Pattern16 {
+	/// The 16-byte chunks of the pattern.
+    chunks: Vec<PatternChunk16>,
+
+	/// Total length of the pattern in bytes (including wildcards).
+    len: usize,
+}
+
+/// A 128-bit (16-byte) chunk.
+struct PatternChunk16 {
+	/// The pattern bytes for this 16-byte chunk.
+    bytes: __m128i,
+
+	/// The mask controlling which bytes are treated as wildcards or literals.
+    mask: __m128i,
+}
+
+fn parse_ida_pattern(pat: &str) -> (Vec<u8>, Vec<u8>) {
+    let mut bytes: Vec<u8> = Vec::new();
+    let mut mask: Vec<u8> = Vec::new();
+
+    for s in pat.split_ascii_whitespace() {
+        if s.contains('?') {
+            // wildcard
+            bytes.push(0x00);
+            mask.push(0xFF);
+        } else {
+            // hex byte
+            let byte = u8::from_str_radix(s, 16).expect("failed to parse pattern hex byte");
+            bytes.push(byte);
+            mask.push(0x00);
+        }
+    }
+
+    (bytes, mask)
+}
+
+impl Pattern16 {
+    /// Creates a `Pattern16` from an IDA-style pattern.
+    ///
+    /// e.g.
+    /// ```rust
+    /// let pat = Pattern16::from_ida("E8 ?? ?? 90 90 90");
+    /// ```
+    pub fn from_ida(pat: &str) -> Self {
+        let (bytes, mask) = parse_ida_pattern(pat);
+
+        let len = bytes.len();
+        assert!(len > 0, "pattern cannot be empty");
+
+        let mut chunks: Vec<PatternChunk16> = Vec::new();
+        let mut i = 0;
+
+        while i < len {
+            let remaining = len - i;
+
+            // take how many we have left capping at 16 bytes
+            let take = remaining.min(16);
+
+            // blocks must be 256-bits (16 bytes)
+            let mut val_block = [0u8; 16];
+            let mut mask_block = [0xFFu8; 16];
+
+            // copy (max 16) bytes
+            val_block[..take].copy_from_slice(&bytes[i..i + take]);
+            mask_block[..take].copy_from_slice(&mask[i..i + take]);
+
+            unsafe {
+                // load 256-bit chunk
+                let bytes = _mm_loadu_si128(val_block.as_ptr() as *const __m128i);
+                let mask = _mm_loadu_si128(mask_block.as_ptr() as *const __m128i);
+
+                chunks.push(PatternChunk16 { bytes, mask });
+            }
+            i += take;
+        }
+
+        Self { chunks, len }
+    }
+}
+
+impl Scanner for Pattern16 {
+	/// Scans a slice of bytes (`haystack`) for all non-overlapping matches
+	/// of the underlying pattern.
+	/// 
+	/// # Returns
+	/// 
+	/// A `Vec<usize>` containing the starting offsets (indices into `haystack`)
+	/// where the pattern was found. If no matches are found, the vector is empty.
+    fn scan_bytes(&self, haystack: &[u8]) -> Vec<usize> {
+        let haystack_len = haystack.len();
+        let pattern_len = self.len;
+
+        if pattern_len > haystack_len {
+            // pattern bigger than the byte slice
+            return vec![];
+        }
+
+        let mut offsets = vec![];
+        let end = haystack_len - pattern_len;
+
+        for i in 0..=end {
+            let mut matched = true;
+
+            for (chunk_idx, chunk) in self.chunks.iter().enumerate() {
+                let offset = i + chunk_idx * 16;
+
+                unsafe {
+                    // convert the bytes to 128bit num (__m128i)
+                    let ptr = haystack.as_ptr().add(offset) as *const __m128i;
+                    let hay = _mm_loadu_si128(ptr);
+
+                    let eq = _mm_cmpeq_epi8(hay, chunk.bytes);
+                    let masked = _mm_or_si128(eq, chunk.mask);
+
+                    if _mm_movemask_epi8(masked) != 0xFFFF {
+                        matched = false;
+                        break;
+                    }
+                }
+            }
+
+            if matched {
+                offsets.push(i);
+            }
+        }
+
+        offsets
+    }
+}
+
+/// A SIMD-accelerated pattern matcher using 256-bit (AVX2) chunks.
+/// 
+/// `Pattern32` stores the pattern as a sequence of 32-byte chunks.
+pub struct Pattern32 {
+	/// The 32-byte chunks of the pattern.
+    chunks: Vec<PatternChunk32>,
+
+	/// Total length of the pattern in bytes (including wildcards).
+    len: usize,
+}
+
+/// A 256-bit (32-byte) chunk.
+struct PatternChunk32 {
+	/// The pattern bytes for this 32-byte chunk.
+    bytes: __m256i,
+
+	/// The mask controlling which bytes are treated as wildcards or literals.
+    mask: __m256i,
+}
+
+impl Pattern32 {
+    /// Creates a `Pattern32` from an IDA-style pattern.
+    ///
+    /// e.g.
+    /// ```rust
+    /// let pat = Pattern32::from_ida("E8 ?? ?? 90 90 90");
+    /// ```
+    pub fn from_ida(pat: &str) -> Self {
+        let (bytes, mask) = parse_ida_pattern(pat);
+
+        let len = bytes.len();
+        assert!(len > 0, "pattern cannot be empty");
+
+        let mut chunks: Vec<PatternChunk32> = Vec::new();
+        let mut i = 0;
+
+        while i < len {
+            let remaining = len - i;
+
+            // take how many we have left capping at 32 bytes
+            let take = remaining.min(32);
+
+            // blocks must be 256-bits (32 bytes)
+            let mut val_block = [0u8; 32];
+            let mut mask_block = [0xFFu8; 32];
+
+            // copy (max 32) bytes
+            val_block[..take].copy_from_slice(&bytes[i..i + take]);
+            mask_block[..take].copy_from_slice(&mask[i..i + take]);
+
+            unsafe {
+                // load 256-bit chunk
+                let bytes = _mm256_loadu_si256(val_block.as_ptr() as *const __m256i);
+                let mask = _mm256_loadu_si256(mask_block.as_ptr() as *const __m256i);
+
+                chunks.push(PatternChunk32 { bytes, mask });
+            }
+            i += take;
+        }
+
+        Self { chunks, len }
+    }
+}
+
+impl Scanner for Pattern32 {
+	/// Scans a slice of bytes (`haystack`) for all non-overlapping matches
+	/// of the underlying pattern.
+	/// 
+	/// # Returns
+	/// 
+	/// A `Vec<usize>` containing the starting offsets (indices into `haystack`)
+	/// where the pattern was found. If no matches are found, the vector is empty.
+    fn scan_bytes(&self, haystack: &[u8]) -> Vec<usize> {
+        let haystack_len = haystack.len();
+        let pattern_len = self.len;
+
+        if pattern_len > haystack_len {
+            // pattern bigger than the byte slice
+            return vec![];
+        }
+
+        let mut offsets = vec![];
+        let end = haystack_len - pattern_len;
+
+        for i in 0..=end {
+            let mut matched = true;
+
+            for (chunk_idx, chunk) in self.chunks.iter().enumerate() {
+                let offset = i + chunk_idx * 32;
+
+                unsafe {
+                    // convert the bytes to 256bit num (__m256i)
+                    let ptr = haystack.as_ptr().add(offset) as *const __m256i;
+                    let hay = _mm256_loadu_si256(ptr);
+
+                    let eq = _mm256_cmpeq_epi8(hay, chunk.bytes);
+                    let masked = _mm256_or_si256(eq, chunk.mask);
+
+                    if _mm256_movemask_epi8(masked) != -1 {
+                        matched = false;
+                        break;
+                    }
+                }
+            }
+
+            if matched {
+                offsets.push(i);
+            }
+        }
+
+        offsets
+    }
+}
+
+#[cfg(test)]
+mod tests {
+	mod pattern16 {
+		use super::super::*;
+
+		#[test]
+        fn simple_exact_match() {
+            let pat = Pattern16::from_ida("DE AD BE EF");
+            let hay = b"\x00\xDE\xAD\xBE\xEF\x00";
+
+            let hits = pat.scan_bytes(hay);
+            assert_eq!(hits, vec![1]);
+        }
+
+        #[test]
+        fn wildcard_middle() {
+            let pat = Pattern16::from_ida("90 ?? 90");
+            let hay = b"\x90\x11\x90\x90\x22\x90";
+            let hits = pat.scan_bytes(hay);
+            assert_eq!(hits, vec![0, 3]);
+        }
+
+        #[test]
+        fn wildcard_edges() {
+            let pat = Pattern16::from_ida("?? 11 22 ??");
+            let hay = b"\x00\x11\x22\x00\xFF\x11\x22\xFF";
+
+            let hits = pat.scan_bytes(hay);
+            assert_eq!(hits, vec![0, 4]);
+        }
+
+        #[test]
+        fn no_match() {
+            let pat = Pattern16::from_ida("AA BB CC");
+            let hay = b"\xAA\xBB\x00\xAA\x00\xCC";
+
+            let hits = pat.scan_bytes(hay);
+            assert!(hits.is_empty());
+        }
+
+        #[test]
+        fn multiple_matches() {
+            let pat = Pattern16::from_ida("41 42");
+            let hay = b"XXABXXABXXAB";
+
+            let hits = pat.scan_bytes(hay);
+            assert_eq!(hits, vec![2, 6, 10]);
+        }
+
+        #[test]
+        fn pattern_at_start() {
+            let pat = Pattern16::from_ida("11 22 33");
+            let hay = b"\x11\x22\x33\x44\x55";
+
+            let hits = pat.scan_bytes(hay);
+            assert_eq!(hits, vec![0]);
+        }
+
+        #[test]
+        fn pattern_at_end() {
+            let pat = Pattern16::from_ida("44 55 66");
+            let hay = b"\x00\x11\x22\x44\x55\x66";
+
+            let hits = pat.scan_bytes(hay);
+            assert_eq!(hits, vec![3]);
+        }
+
+        #[test]
+        fn pattern_longer_than_32_bytes() {
+            // 40‑byte pattern → 2 chunks
+            let pat = Pattern16::from_ida(
+                "01 02 03 04 05 06 07 08 \
+             09 0A 0B 0C 0D 0E 0F 10 \
+             11 12 13 14 15 16 17 18 \
+             19 1A 1B 1C 1D 1E 1F 20 \
+             21 22 23 24 25 26 27 28",
+            );
+
+            // Insert pattern starting at offset 5
+            let mut hay = vec![0u8; 5];
+            hay.extend_from_slice(&[
+                0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E,
+                0x0F, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C,
+                0x1D, 0x1E, 0x1F, 0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28,
+            ]);
+            hay.extend_from_slice(&[0xFF, 0xFF, 0xFF]);
+
+            let hits = pat.scan_bytes(&hay);
+            assert_eq!(hits, vec![5]);
+        }
+
+        #[test]
+        fn pattern_not_aligned_to_32_bytes() {
+            // 17‑byte pattern → 1 full chunk + padding
+            let pat = Pattern16::from_ida(
+                "AA BB CC DD EE FF 11 22 \
+             33 44 55 66 77 88 99 AA BB",
+            );
+
+            let mut hay = vec![0u8; 10];
+            hay.extend_from_slice(&[
+                0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88,
+                0x99, 0xAA, 0xBB,
+            ]);
+            hay.extend_from_slice(&[0x00, 0x00]);
+
+            let hits = pat.scan_bytes(&hay);
+            assert_eq!(hits, vec![10]);
+        }
+
+        #[test]
+        fn wildcard_heavy_pattern() {
+            // 8‑byte pattern with 6 wildcards
+            let pat = Pattern16::from_ida("AA ?? ?? ?? ?? ?? BB CC");
+            let hay = b"\xAA\x11\x22\x33\x44\x55\xBB\xCC";
+
+            let hits = pat.scan_bytes(hay);
+            assert_eq!(hits, vec![0]);
+        }
+	}
+
+    mod pattern32 {
+		use super::super::*;
+
+        #[test]
+        fn simple_exact_match() {
+            let pat = Pattern32::from_ida("DE AD BE EF");
+            let hay = b"\x00\xDE\xAD\xBE\xEF\x00";
+
+            let hits = pat.scan_bytes(hay);
+            assert_eq!(hits, vec![1]);
+        }
+
+        #[test]
+        fn wildcard_middle() {
+            let pat = Pattern32::from_ida("90 ?? 90");
+            let hay = b"\x90\x11\x90\x90\x22\x90";
+            let hits = pat.scan_bytes(hay);
+            assert_eq!(hits, vec![0, 3]);
+        }
+
+        #[test]
+        fn wildcard_edges() {
+            let pat = Pattern32::from_ida("?? 11 22 ??");
+            let hay = b"\x00\x11\x22\x00\xFF\x11\x22\xFF";
+
+            let hits = pat.scan_bytes(hay);
+            assert_eq!(hits, vec![0, 4]);
+        }
+
+        #[test]
+        fn no_match() {
+            let pat = Pattern32::from_ida("AA BB CC");
+            let hay = b"\xAA\xBB\x00\xAA\x00\xCC";
+
+            let hits = pat.scan_bytes(hay);
+            assert!(hits.is_empty());
+        }
+
+        #[test]
+        fn multiple_matches() {
+            let pat = Pattern32::from_ida("41 42");
+            let hay = b"XXABXXABXXAB";
+
+            let hits = pat.scan_bytes(hay);
+            assert_eq!(hits, vec![2, 6, 10]);
+        }
+
+        #[test]
+        fn pattern_at_start() {
+            let pat = Pattern32::from_ida("11 22 33");
+            let hay = b"\x11\x22\x33\x44\x55";
+
+            let hits = pat.scan_bytes(hay);
+            assert_eq!(hits, vec![0]);
+        }
+
+        #[test]
+        fn pattern_at_end() {
+            let pat = Pattern32::from_ida("44 55 66");
+            let hay = b"\x00\x11\x22\x44\x55\x66";
+
+            let hits = pat.scan_bytes(hay);
+            assert_eq!(hits, vec![3]);
+        }
+
+        #[test]
+        fn pattern_longer_than_32_bytes() {
+            // 40‑byte pattern → 2 chunks
+            let pat = Pattern32::from_ida(
+                "01 02 03 04 05 06 07 08 \
+             09 0A 0B 0C 0D 0E 0F 10 \
+             11 12 13 14 15 16 17 18 \
+             19 1A 1B 1C 1D 1E 1F 20 \
+             21 22 23 24 25 26 27 28",
+            );
+
+            // Insert pattern starting at offset 5
+            let mut hay = vec![0u8; 5];
+            hay.extend_from_slice(&[
+                0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E,
+                0x0F, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C,
+                0x1D, 0x1E, 0x1F, 0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28,
+            ]);
+            hay.extend_from_slice(&[0xFF, 0xFF, 0xFF]);
+
+            let hits = pat.scan_bytes(&hay);
+            assert_eq!(hits, vec![5]);
+        }
+
+        #[test]
+        fn pattern_not_aligned_to_32_bytes() {
+            // 17‑byte pattern → 1 full chunk + padding
+            let pat = Pattern32::from_ida(
+                "AA BB CC DD EE FF 11 22 \
+             33 44 55 66 77 88 99 AA BB",
+            );
+
+            let mut hay = vec![0u8; 10];
+            hay.extend_from_slice(&[
+                0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88,
+                0x99, 0xAA, 0xBB,
+            ]);
+            hay.extend_from_slice(&[0x00, 0x00]);
+
+            let hits = pat.scan_bytes(&hay);
+            assert_eq!(hits, vec![10]);
+        }
+
+        #[test]
+        fn wildcard_heavy_pattern() {
+            // 8‑byte pattern with 6 wildcards
+            let pat = Pattern32::from_ida("AA ?? ?? ?? ?? ?? BB CC");
+            let hay = b"\xAA\x11\x22\x33\x44\x55\xBB\xCC";
+
+            let hits = pat.scan_bytes(hay);
+            assert_eq!(hits, vec![0]);
+        }
+    }
+}
