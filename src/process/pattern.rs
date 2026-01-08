@@ -1,37 +1,37 @@
 use core::arch::x86_64::*;
 
 /// A trait for scanning a byte slice for occurrences of a pattern.
-/// 
+///
 /// Types implementing this trait define how a pattern is represented and
 /// how it is matched against a given haystack.
 pub trait Scanner {
     /// Scans a slice of bytes (`haystack`) for all non-overlapping matches
-	/// of the underlying pattern.
-	/// 
-	/// # Returns
-	/// 
-	/// A `Vec<usize>` containing the starting offsets (indices into `haystack`)
-	/// where the pattern was found. If no matches are found, the vector is empty.
+    /// of the underlying pattern.
+    ///
+    /// # Returns
+    ///
+    /// A `Vec<usize>` containing the starting offsets (indices into `haystack`)
+    /// where the pattern was found. If no matches are found, the vector is empty.
     fn scan_bytes(&self, haystack: &[u8]) -> Vec<usize>;
 }
 
 /// A SIMD-accelerated pattern matcher using 128-bit (SSE) chunks.
-/// 
+///
 /// `Pattern16` stores the pattern as a sequence of 16-byte chunks and
 pub struct Pattern16 {
-	/// The 16-byte chunks of the pattern.
+    /// The 16-byte chunks of the pattern.
     chunks: Vec<PatternChunk16>,
 
-	/// Total length of the pattern in bytes (including wildcards).
+    /// Total length of the pattern in bytes (including wildcards).
     len: usize,
 }
 
 /// A 128-bit (16-byte) chunk.
 struct PatternChunk16 {
-	/// The pattern bytes for this 16-byte chunk.
+    /// The pattern bytes for this 16-byte chunk.
     bytes: __m128i,
 
-	/// The mask controlling which bytes are treated as wildcards or literals.
+    /// The mask controlling which bytes are treated as wildcards or literals.
     mask: __m128i,
 }
 
@@ -64,8 +64,35 @@ impl Pattern16 {
     /// ```
     pub fn from_ida(pat: &str) -> Self {
         let (bytes, mask) = parse_ida_pattern(pat);
+		Self::from_bytes(bytes, mask)
+    }
 
-        let len = bytes.len();
+	/// Creates a `Pattern16` from a code-style pattern
+	/// 
+	/// # Example
+	/// ```
+	/// let pattern = Pattern16::from_byte_mask(
+	///     &[0x90, 0xE8, 0x09, 0x00],
+	///     &['x', 'x', '?', '?']
+	/// );
+	/// ```
+	/// This will match memory sequences where the first two bytes are exactly `0x90 0xE8`
+	/// and the next two bytes can be any value.
+	///
+	/// # Panics
+	/// Panics if `bytes` and `mask` have different lengths.
+    pub fn from_byte_mask(bytes: &[u8], mask: &[char]) -> Self {
+		assert_eq!(bytes.len(), mask.len(), "mismatched bytes & mask length");
+
+        let not_mask = mask
+            .iter()
+            .map(|&c| if c == '?' { 0xFF } else { 0x00 })
+            .collect();
+        Self::from_bytes(bytes.to_vec(), not_mask)
+    }
+
+	fn from_bytes(bytes: Vec<u8>, mask: Vec<u8>) -> Self {
+		let len = bytes.len();
         assert!(len > 0, "pattern cannot be empty");
 
         let mut chunks: Vec<PatternChunk16> = Vec::new();
@@ -96,17 +123,17 @@ impl Pattern16 {
         }
 
         Self { chunks, len }
-    }
+	}
 }
 
 impl Scanner for Pattern16 {
-	/// Scans a slice of bytes (`haystack`) for all non-overlapping matches
-	/// of the underlying pattern.
-	/// 
-	/// # Returns
-	/// 
-	/// A `Vec<usize>` containing the starting offsets (indices into `haystack`)
-	/// where the pattern was found. If no matches are found, the vector is empty.
+    /// Scans a slice of bytes (`haystack`) for all non-overlapping matches
+    /// of the underlying pattern.
+    ///
+    /// # Returns
+    ///
+    /// A `Vec<usize>` containing the starting offsets (indices into `haystack`)
+    /// where the pattern was found. If no matches are found, the vector is empty.
     fn scan_bytes(&self, haystack: &[u8]) -> Vec<usize> {
         let haystack_len = haystack.len();
         let pattern_len = self.len;
@@ -150,22 +177,22 @@ impl Scanner for Pattern16 {
 }
 
 /// A SIMD-accelerated pattern matcher using 256-bit (AVX2) chunks.
-/// 
+///
 /// `Pattern32` stores the pattern as a sequence of 32-byte chunks.
 pub struct Pattern32 {
-	/// The 32-byte chunks of the pattern.
+    /// The 32-byte chunks of the pattern.
     chunks: Vec<PatternChunk32>,
 
-	/// Total length of the pattern in bytes (including wildcards).
+    /// Total length of the pattern in bytes (including wildcards).
     len: usize,
 }
 
 /// A 256-bit (32-byte) chunk.
 struct PatternChunk32 {
-	/// The pattern bytes for this 32-byte chunk.
+    /// The pattern bytes for this 32-byte chunk.
     bytes: __m256i,
 
-	/// The mask controlling which bytes are treated as wildcards or literals.
+    /// The mask controlling which bytes are treated as wildcards or literals.
     mask: __m256i,
 }
 
@@ -178,7 +205,34 @@ impl Pattern32 {
     /// ```
     pub fn from_ida(pat: &str) -> Self {
         let (bytes, mask) = parse_ida_pattern(pat);
+        Self::from_bytes(bytes, mask)
+    }
 
+    /// Creates a `Pattern32` from a code-style pattern
+	/// 
+	/// # Example
+	/// ```
+	/// let pattern = Pattern32::from_byte_mask(
+	///     &[0x90, 0xE8, 0x09, 0x00],
+	///     &['x', 'x', '?', '?']
+	/// );
+	/// ```
+	/// This will match memory sequences where the first two bytes are exactly `0x90 0xE8`
+	/// and the next two bytes can be any value.
+	///
+	/// # Panics
+	/// Panics if `bytes` and `mask` have different lengths.
+    pub fn from_byte_mask(bytes: &[u8], mask: &[char]) -> Self {
+		assert_eq!(bytes.len(), mask.len(), "mismatched bytes & mask length");
+
+        let not_mask = mask
+            .iter()
+            .map(|&c| if c == '?' { 0xFF } else { 0x00 })
+            .collect();
+        Self::from_bytes(bytes.to_vec(), not_mask)
+    }
+
+    fn from_bytes(bytes: Vec<u8>, mask: Vec<u8>) -> Self {
         let len = bytes.len();
         assert!(len > 0, "pattern cannot be empty");
 
@@ -214,13 +268,13 @@ impl Pattern32 {
 }
 
 impl Scanner for Pattern32 {
-	/// Scans a slice of bytes (`haystack`) for all non-overlapping matches
-	/// of the underlying pattern.
-	/// 
-	/// # Returns
-	/// 
-	/// A `Vec<usize>` containing the starting offsets (indices into `haystack`)
-	/// where the pattern was found. If no matches are found, the vector is empty.
+    /// Scans a slice of bytes (`haystack`) for all non-overlapping matches
+    /// of the underlying pattern.
+    ///
+    /// # Returns
+    ///
+    /// A `Vec<usize>` containing the starting offsets (indices into `haystack`)
+    /// where the pattern was found. If no matches are found, the vector is empty.
     fn scan_bytes(&self, haystack: &[u8]) -> Vec<usize> {
         let haystack_len = haystack.len();
         let pattern_len = self.len;
@@ -265,10 +319,10 @@ impl Scanner for Pattern32 {
 
 #[cfg(test)]
 mod tests {
-	mod pattern16 {
-		use super::super::*;
+    mod pattern16 {
+        use super::super::*;
 
-		#[test]
+        #[test]
         fn simple_exact_match() {
             let pat = Pattern16::from_ida("DE AD BE EF");
             let hay = b"\x00\xDE\xAD\xBE\xEF\x00";
@@ -382,10 +436,10 @@ mod tests {
             let hits = pat.scan_bytes(hay);
             assert_eq!(hits, vec![0]);
         }
-	}
+    }
 
     mod pattern32 {
-		use super::super::*;
+        use super::super::*;
 
         #[test]
         fn simple_exact_match() {
