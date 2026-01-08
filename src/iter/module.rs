@@ -33,12 +33,9 @@ impl<'a, P: Process> ModuleIterator<'a, P> {
         let info = query_process_basic_info(handle)?;
         let peb_address = info.peb_base_address;
 
-        // let peb = process.read_mem(peb_address)?;
-
-        // read PEB LDR address
+        // read PEB->LDR address
         let ldr_address: usize =
             process.read_mem(peb_address as usize + offset_of!(ProcessEnvBlock, ldr))?;
-        // let ldr = process.read_mem(ldr_address)?;
 
         let offset = match order {
             ModuleIterOrder::Load => offset_of!(PebLoaderData, in_load_order_module_list),

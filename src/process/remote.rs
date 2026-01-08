@@ -550,8 +550,6 @@ impl Process for RemoteProcess {
             let mut chunk = [0u8; 64];
             let mut bytes_read = 0;
 
-			println!("{:?}", self.query_mem(base_address + offset));
-
             let status = nt_read_virtual_memory(
                 self.0,
                 (base_address + offset) as _,
@@ -957,13 +955,9 @@ mod tests {
         let access = ProcessAccess::QUERY_INFORMATION;
         let process = RemoteProcess::open_first_named("Discord.exe", access)?;
 
-        let handles = process.handles()?;
+        let _handles = process.handles()?;
 
-        if let Some(first) = handles.get(0) {
-            println!("{:#x}", first.handle);
-            println!("{}", first.name()?);
-            println!("{}", first.type_name()?);
-        }
+		// todo: make actually good test here
 
         Ok(())
     }
@@ -1083,9 +1077,17 @@ mod tests {
             .next()
             .expect("failed to get first module of remote process");
 
-        println!("ntdll @ {:#x}", ntdll.base_address);
+		unsafe extern "system" {
+			fn GetProcAddress(hmodule: usize, proc_name: *const u8) -> usize;
+		}
+        
+		let addr = ntdll.get_export("NtOpenProcess")?;
+		let addr2 = unsafe {
+			let proc_name = b"NtOpenProcess\0";
+			GetProcAddress(ntdll.base_address, proc_name.as_ptr())
+		};
 
-        ntdll.get_export("NtOpenProcess");
+		assert_eq!(addr, addr2, "failed to get remote process ntdll export 'NtOpenProcess'");
 
         Ok(())
     }

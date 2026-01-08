@@ -58,7 +58,8 @@ impl CurrentProcess {
 
 impl Process for CurrentProcess {
     /// Returns the pseudo handle (`-1`) of the current process.
-    unsafe fn handle(&self) -> Handle {
+    #[inline(always)]
+	unsafe fn handle(&self) -> Handle {
         -1isize as Handle
     }
 

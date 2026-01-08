@@ -7,8 +7,7 @@ use crate::{
     windows::{
         DllEntryPoint,
         structs::{
-            ImageDataDirectory, ImageDosHeader, ImageExportDirectory, ImageNtHeaders64,
-            ImageSectionHeader,
+            ImageDataDirectory, ImageDosHeader, ImageExportDirectory, ImageNtHeaders64, ImageOptionalHeader64, ImageSectionHeader
         },
     },
 };
@@ -106,11 +105,14 @@ impl<'a, P: Process> Module<'a, P> {
             .read_mem(self.base_address + offset_of!(ImageDosHeader, e_lfanew))?;
         let nt_headers_ptr = self.base_address + nt_headers_offset as usize;
 
-        // ImageNtHeaders64->ImageOptionalHeader64      +0x18
-        // ImageOptionalHeader64->ImageDataDirectory[0] +0x70
-        // ImageDataDirectory->VirtualAddress		    +0x0
-        let exp_data_dir: ImageDataDirectory =
-            self.process.read_mem(nt_headers_ptr + 0x18 + 0x70)?;
+		let exp_data_dir: ImageDataDirectory = self.process.read_mem(nt_headers_ptr +
+			offset_of!(ImageNtHeaders64, optional_header) +
+			
+			// we do not need to do any additional offsets from this point
+			// because ImageOptionalHeader64->data_directory[0] is ImageDataDirectory
+			// and ImageDataDirectory->virtual_address is the first property (0x0 offset)
+			offset_of!(ImageOptionalHeader64, data_directory)
+		)?;
         if exp_data_dir.virtual_address == 0 {
             return Err(ProcessError::MalformedPE);
         }

@@ -13,6 +13,13 @@ use core::{mem::zeroed, ptr};
 /// Represents an object with a handle.
 /// Used to query information about the handle, such as
 /// the type, name, and granted access of it.
+/// 
+/// # Safety
+/// 
+/// `HandleObject` does not automatically close the inner handle
+/// upon being dropped. The caller must ensure that
+/// the raw handle is closed once it is dropped, whether via 
+/// [close_handle][`crate::close_handle`] or a [SafeHandle][`crate::SafeHandle`] struct.
 #[repr(transparent)]
 pub struct HandleObject(Handle);
 
