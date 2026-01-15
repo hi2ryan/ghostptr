@@ -1,25 +1,27 @@
-mod address;
 pub mod current;
 pub mod module;
+pub mod pattern;
+pub mod ptr;
 pub mod remote;
 pub mod thread;
 pub mod utils;
-pub mod pattern;
 
 pub use crate::windows::flags::*;
-pub use address::Address;
 pub use current::CurrentProcess;
 pub use module::{Export, Module};
+pub use pattern::{Pattern16, Pattern32, Scanner};
+pub use ptr::AsPointer;
 pub use remote::RemoteProcess;
 pub use thread::Thread;
-pub use utils::{MemoryInfo, MemoryRegion, ProcessHandleInfo};
-pub use pattern::{Scanner, Pattern16, Pattern32};
+pub use utils::{AddressRange, MemoryInfo, MemoryRegion, ProcessHandleInfo};
 
 use crate::{
-    Result, iter::{
+    Result,
+    iter::{
         module::{ModuleIterOrder, ModuleIterator},
         thread::ThreadView,
-    }, process::utils::AddressRange, windows::{Handle, NtStatus}
+    },
+    windows::{Handle, NtStatus},
 };
 
 pub trait Process {
@@ -95,8 +97,8 @@ pub trait Process {
 
     /* MODULES */
 
-	/// Enumerates the modules within the process and finds the
-	/// first loaded module (the main module)
+    /// Enumerates the modules within the process and finds the
+    /// first loaded module (the main module)
     ///
     /// # Access Rights
     ///
@@ -118,8 +120,8 @@ pub trait Process {
     where
         Self: Sized;
 
-	/// Enumerates the modules within the process and finds
-	/// a module matching the `name` provided.
+    /// Enumerates the modules within the process and finds
+    /// a module matching the `name` provided.
     ///
     /// # Access Rights
     ///
@@ -163,12 +165,12 @@ pub trait Process {
 
     /* MEMORY */
 
-	/// Reads a value of type `T` from the process's memory.
+    /// Reads a value of type `T` from the process's memory.
     ///
-	/// This method copies `size_of::<T>()` bytes from the target process
+    /// This method copies `size_of::<T>()` bytes from the target process
     /// into a local `T`. The address may be provided as
-    /// any type implementing [`Address<T>`], such as a raw pointer or integer address.
-	/// 
+    /// any type implementing [`AsPointer<T>`], such as a raw pointer or integer address.
+    ///
     /// # Access Rights
     ///
     /// If this is a remote process, this method
@@ -183,21 +185,21 @@ pub trait Process {
     ///
     /// Returns [`crate::ProcessError::NtStatus`] if reading the memory fails,
     /// potentially due to insufficient access rights.
-	/// 
-	/// # Example
+    ///
+    /// # Example
     ///
     /// ```rust
     /// let value: u32 = process.read_mem(0x7FF6_1234_5678)?;
     /// println!("value: {}", value);
     /// ```
-    fn read_mem<T: Copy, A: Address<T>>(&self, address: A) -> Result<T>;
+    fn read_mem<T: Copy>(&self, address: impl AsPointer<T>) -> Result<T>;
 
-	/// Reads a slice of type `T` from the process's memory.
+    /// Reads a slice of type `T` from the process's memory.
     ///
-	/// This method copies `size_of::<T>() * len` bytes from the target process
+    /// This method copies `size_of::<T>() * len` bytes from the target process
     /// into a local `Vec<T>`. The address may be provided as
-    /// any type implementing [`Address<T>`], such as a raw pointer or integer address.
-	/// 
+    /// any type implementing [`AsPointer<T>`], such as a raw pointer or integer address.
+    ///
     /// # Access Rights
     ///
     /// If this is a remote process, this method
@@ -212,11 +214,11 @@ pub trait Process {
     ///
     /// Returns [`crate::ProcessError::NtStatus`] if reading the memory fails,
     /// potentially due to insufficient access rights.
-    fn read_slice<T: Copy, A: Address<T>>(&self, address: A, len: usize) -> Result<Vec<T>>;
+    fn read_slice<T: Copy>(&self, address: impl AsPointer<T>, len: usize) -> Result<Vec<T>>;
 
-	/// Reads a C string from the process' memory, continuing reading
-	/// memory until it finds a null terminator or reaches `len`.
-	/// 
+    /// Reads a C string from the process' memory, continuing reading
+    /// memory until it finds a null terminator or reaches `len`.
+    ///
     /// # Access Rights
     ///
     /// If this is a remote process, this method
@@ -231,20 +233,20 @@ pub trait Process {
     ///
     /// Returns [`crate::ProcessError::NtStatus`] if reading the memory fails,
     /// potentially due to insufficient access rights.
-	/// 
-	/// # Safety
-	/// 
-	/// The caller must ensure that the memory read is a proper c string
-	/// with a null terminator. This method will continue reading memory
-	/// until it finds a null terminator or, if `len` is not `None`, until it reaches `len`.
-    fn read_c_string<A: Address<u8>>(&self, address: A, len: Option<usize>) -> Result<String>;
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure that the memory read is a proper c string
+    /// with a null terminator. This method will continue reading memory
+    /// until it finds a null terminator or, if `len` is not `None`, until it reaches `len`.
+    fn read_c_string(&self, address: impl AsPointer, len: Option<usize>) -> Result<String>;
 
-	/// Writes a value of type `T` to the process's memory
-	/// 
-	/// This method copies `size_of::<T>()` bytes to the address in the
-	/// target process's memory. The address may be provided as
-    /// any type implementing [`Address<T>`], such as a raw pointer or integer address.
-	/// 
+    /// Writes a value of type `T` to the process's memory
+    ///
+    /// This method copies `size_of::<T>()` bytes to the address in the
+    /// target process's memory. The address may be provided as
+    /// any type implementing [`AsPointer<T>`], such as a raw pointer or integer address.
+    ///
     /// # Access Rights
     ///
     /// If this is a remote process, this method
@@ -259,14 +261,14 @@ pub trait Process {
     ///
     /// Returns [`crate::ProcessError::NtStatus`] if writing the memory fails,
     /// potentially due to insufficient access rights.
-    fn write_mem<T, A: Address<T>>(&self, address: A, value: &T) -> Result<()>;
+    fn write_mem<T>(&self, address: impl AsPointer<T>, value: &T) -> Result<()>;
 
-	/// Writes a slice of type `T` to the process's memory
-	/// 
-	/// This method copies `size_of::<T>() * value.len()` bytes to the address in the
-	/// target process's memory. The address may be provided as
-    /// any type implementing [`Address<T>`], such as a raw pointer or integer address.
-	/// 
+    /// Writes a slice of type `T` to the process's memory
+    ///
+    /// This method copies `size_of::<T>() * value.len()` bytes to the address in the
+    /// target process's memory. The address may be provided as
+    /// any type implementing [`AsPointer<T>`], such as a raw pointer or integer address.
+    ///
     /// # Access Rights
     ///
     /// If this is a remote process, this method
@@ -281,20 +283,20 @@ pub trait Process {
     ///
     /// Returns [`crate::ProcessError::NtStatus`] if writing the memory fails,
     /// potentially due to insufficient access rights.
-    fn write_slice<T, A: Address<T>>(&self, address: A, value: &[T]) -> Result<()>;
+    fn write_slice<T>(&self, address: impl AsPointer<T>, value: &[T]) -> Result<()>;
 
-	/// Queries information about a region of virtual memory in the process.
-	/// 
-	/// The address may be provided as any type implementing [`Address<u8>`],
-	/// such as a raw pointer or integer address.
-	/// 
+    /// Queries information about a region of virtual memory in the process.
+    ///
+    /// The address may be provided as any type implementing [`AsPointer`],
+    /// such as a raw pointer or integer address.
+    ///
     /// # Access Rights
     ///
     /// If this is a remote process, this method
     /// requires the process handle access mask to include:
     ///
     /// - [`ProcessAccess::VM_READ`], **and**
-	/// - [`ProcessAccess::QUERY_INFORMATION`]
+    /// - [`ProcessAccess::QUERY_INFORMATION`]
     ///
     /// Without this right, the system call will fail with an
     /// `NTSTATUS` error.
@@ -303,14 +305,14 @@ pub trait Process {
     ///
     /// Returns [`crate::ProcessError::NtStatus`] if querying the memory fails,
     /// potentially due to insufficient access rights.
-    fn query_mem<A: Address<u8>>(&self, address: A) -> Result<MemoryInfo>;
+    fn query_mem(&self, address: impl AsPointer) -> Result<MemoryInfo>;
 
-	/// Changes the protection on a region of virtual memory in the process.
-	/// Returns the region's previous protection.
-	/// 
-	/// The address may be provided as any type implementing [`Address<u8>`],
-	/// such as a raw pointer or integer address.
-	/// 
+    /// Changes the protection on a region of virtual memory in the process.
+    /// Returns the region's previous protection.
+    ///
+    /// The address may be provided as any type implementing [`AsPointer`],
+    /// such as a raw pointer or integer address.
+    ///
     /// # Access Rights
     ///
     /// If this is a remote process, this method
@@ -325,19 +327,19 @@ pub trait Process {
     ///
     /// Returns [`crate::ProcessError::NtStatus`] if protecting the memory fails,
     /// potentially due to insufficient access rights.
-    fn protect_mem<A: Address<u8>>(
+    fn protect_mem(
         &self,
-        address: A,
+        address: impl AsPointer,
         size: usize,
         new_protection: MemoryProtection,
     ) -> Result<MemoryProtection>;
 
-	/// Reserves and/or commits a region of pages within the process's
-	/// virtual memory.
-	/// 
-	/// If `address` is not `None`, the region is allocated at the
-	/// specified virtual address.
-	/// 
+    /// Reserves and/or commits a region of pages within the process's
+    /// virtual memory.
+    ///
+    /// If `address` is not `None`, the region is allocated at the
+    /// specified virtual address.
+    ///
     /// # Access Rights
     ///
     /// If this is a remote process, this method
@@ -360,11 +362,11 @@ pub trait Process {
         protection: MemoryProtection,
     ) -> Result<MemoryRegion<Self>>;
 
-	/// Frees allocated virtual memory in the process.
-	/// 
-	/// The address may be provided as any type implementing [`Address<u8>`],
-	/// such as a raw pointer or integer address.
-	/// 
+    /// Frees allocated virtual memory in the process.
+    ///
+    /// The address may be provided as any type implementing [`AsPointer`],
+    /// such as a raw pointer or integer address.
+    ///
     /// # Access Rights
     ///
     /// If this is a remote process, this method
@@ -379,7 +381,27 @@ pub trait Process {
     ///
     /// Returns [`crate::ProcessError::NtStatus`] if freeing the memory fails,
     /// potentially due to insufficient access rights.
-    fn free_mem<A: Address<u8>>(&self, address: A, size: usize, r#type: FreeType) -> Result<()>;
+    fn free_mem(&self, address: impl AsPointer, size: usize, r#type: FreeType) -> Result<()>;
 
-	fn pattern_scan<S: Scanner>(&self, range: AddressRange, pattern: &S) -> Result<Vec<usize>>;
+	/// Scans virtual memory in the process
+	/// According to the `AddressRange` `range`.
+	///
+    /// The address may be provided as any type implementing [`AsPointer`],
+    /// such as a raw pointer or integer address.
+    ///
+    /// # Access Rights
+    ///
+    /// If this is a remote process, this method
+    /// requires the process handle access mask to include:
+    ///
+    /// - [`ProcessAccess::VM_READ`]
+    ///
+    /// Without this right, the system call will fail with an
+    /// `NTSTATUS` error.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::ProcessError::NtStatus`] if reading the memory fails,
+    /// potentially due to insufficient access rights.
+    fn scan_mem<S: Scanner>(&self, range: AddressRange, pattern: &S) -> Result<Vec<usize>>;
 }

@@ -31,7 +31,7 @@ pub use iter::{ModuleIterOrder, ModuleIterator, ProcessIterator, ProcessView, Th
 pub use misc::HandleObject;
 pub use process::{
     CurrentProcess, Export, MemoryInfo, MemoryRegion, Module, Pattern16, Pattern32, Process,
-    ProcessHandleInfo, RemoteProcess, Scanner, Thread,
+    ProcessHandleInfo, RemoteProcess, Scanner, Thread, AddressRange,
 };
 pub use utils::{SafeHandle, close_handle};
 pub use windows::{Handle, NtStatus, flags::*};

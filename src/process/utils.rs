@@ -1,7 +1,6 @@
+use core::ops::Range;
 use crate::{
-    HandleObject, ProcessError, Result,
-    process::{FreeType, MemoryProtection, MemoryState, MemoryType, Process},
-    windows::{
+    HandleObject, ProcessError, Result, Scanner, process::{FreeType, MemoryProtection, MemoryState, MemoryType, Process}, windows::{
         Handle,
         constants::{CURRENT_PROCESS_HANDLE, STATUS_INFO_LENGTH_MISMATCH},
         structs::{
@@ -9,14 +8,10 @@ use crate::{
         },
         utils::unicode_to_string,
         wrappers::{nt_duplicate_object, nt_query_object},
-    },
+    }
 };
 
-#[derive(Debug, Clone, Copy)]
-pub struct AddressRange {
-    pub start: usize,
-    pub size: usize,
-}
+pub type AddressRange = Range<usize>;
 
 #[derive(Debug, Clone)]
 pub struct MemoryInfo {
@@ -232,4 +227,14 @@ impl<'a, P: Process> MemoryRegion<'a, P> {
     pub fn free(&self, r#type: FreeType) -> Result<()> {
         self.process.free_mem(self.address, self.size, r#type)
     }
+
+	#[inline(always)]
+	pub fn write<T>(&self, offset: usize, value: &T) -> Result<()> {
+		self.process.write_mem(self.address + offset, value)
+	}
+
+	#[inline(always)]
+	pub fn read<T: Copy>(&self, offset: usize) -> Result<T> {
+		self.process.read_mem(self.address + offset)
+	}
 }

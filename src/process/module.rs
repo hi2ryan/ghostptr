@@ -22,10 +22,10 @@ pub struct Section {
 }
 
 impl Section {
-    pub fn addr_range(&self) -> AddressRange {
+    pub fn virtual_range(&self) -> AddressRange {
         let start = self.address;
         let size = self.size as usize;
-        AddressRange { start, size }
+        start..(start + size)
     }
 }
 
@@ -271,15 +271,13 @@ impl<'a, P: Process> Module<'a, P> {
         Ok(sections)
     }
 
-    #[inline]
-    pub fn addr_range(&self) -> AddressRange {
-        let start = self.base_address;
-        let size = self.image_size as usize;
-        AddressRange { start, size }
+    #[inline(always)]
+    pub fn virtual_range(&self) -> AddressRange {
+		self.base_address..(self.base_address + self.image_size as usize)
     }
 
     pub fn pattern_scan<S: Scanner>(&self, pattern: &S) -> Result<Vec<usize>> {
-        self.process.pattern_scan(self.addr_range(), pattern)
+        self.process.scan_mem(self.virtual_range(), pattern)
     }
 
     fn nt_headers(&self) -> Result<usize> {
@@ -358,7 +356,7 @@ mod tests {
         ];
 
         let base_address = ntdll.get_export("NtWriteVirtualMemory")?;
-        let fn_bytes = process.read_slice::<u8, _>(base_address, EXPECTED_BYTES.len())?;
+        let fn_bytes = process.read_slice::<u8>(base_address, EXPECTED_BYTES.len())?;
 
         // match NtWriteVirtualMemory bytes
         for (&expected, &byte) in EXPECTED_BYTES.iter().zip(fn_bytes.iter()) {

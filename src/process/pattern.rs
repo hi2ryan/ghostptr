@@ -58,31 +58,42 @@ fn parse_ida_pattern(pat: &str) -> (Vec<u8>, Vec<u8>) {
 impl Pattern16 {
     /// Creates a `Pattern16` from an IDA-style pattern.
     ///
-    /// e.g.
+    /// # Example
     /// ```rust
     /// let pat = Pattern16::from_ida("E8 ?? ?? 90 90 90");
     /// ```
     pub fn from_ida(pat: &str) -> Self {
         let (bytes, mask) = parse_ida_pattern(pat);
-		Self::from_bytes(bytes, mask)
+        Self::from_bytes(bytes, mask)
     }
 
-	/// Creates a `Pattern16` from a code-style pattern
+	/// Creates a `Pattern16` from bytes without wildcards.
 	/// 
 	/// # Example
-	/// ```
-	/// let pattern = Pattern16::from_byte_mask(
-	///     &[0x90, 0xE8, 0x09, 0x00],
-	///     &['x', 'x', '?', '?']
-	/// );
-	/// ```
-	/// This will match memory sequences where the first two bytes are exactly `0x90 0xE8`
-	/// and the next two bytes can be any value.
-	///
-	/// # Panics
-	/// Panics if `bytes` and `mask` have different lengths.
+    /// ```rust
+    /// let pat = Pattern16::literal(b".?AV@DATA@@");
+    /// ```
+    pub fn literal(bytes: &[u8]) -> Self {
+        let mask = vec![0x00; bytes.len()];
+        Self::from_bytes(bytes.to_vec(), mask)
+    }
+
+    /// Creates a `Pattern16` from a code-style pattern
+    ///
+    /// # Example
+    /// ```
+    /// let pattern = Pattern16::from_byte_mask(
+    ///     &[0x90, 0xE8, 0x09, 0x00],
+    ///     &['x', 'x', '?', '?']
+    /// );
+    /// ```
+    /// This will match memory sequences where the first two bytes are exactly `0x90 0xE8`
+    /// and the next two bytes can be any value.
+    ///
+    /// # Panics
+    /// Panics if `bytes` and `mask` have different lengths.
     pub fn from_byte_mask(bytes: &[u8], mask: &[char]) -> Self {
-		assert_eq!(bytes.len(), mask.len(), "mismatched bytes & mask length");
+        assert_eq!(bytes.len(), mask.len(), "mismatched bytes & mask length");
 
         let not_mask = mask
             .iter()
@@ -91,8 +102,8 @@ impl Pattern16 {
         Self::from_bytes(bytes.to_vec(), not_mask)
     }
 
-	fn from_bytes(bytes: Vec<u8>, mask: Vec<u8>) -> Self {
-		let len = bytes.len();
+    fn from_bytes(bytes: Vec<u8>, mask: Vec<u8>) -> Self {
+        let len = bytes.len();
         assert!(len > 0, "pattern cannot be empty");
 
         let mut chunks: Vec<PatternChunk16> = Vec::new();
@@ -123,7 +134,7 @@ impl Pattern16 {
         }
 
         Self { chunks, len }
-	}
+    }
 }
 
 impl Scanner for Pattern16 {
@@ -199,7 +210,7 @@ struct PatternChunk32 {
 impl Pattern32 {
     /// Creates a `Pattern32` from an IDA-style pattern.
     ///
-    /// e.g.
+    /// # Example
     /// ```rust
     /// let pat = Pattern32::from_ida("E8 ?? ?? 90 90 90");
     /// ```
@@ -208,22 +219,33 @@ impl Pattern32 {
         Self::from_bytes(bytes, mask)
     }
 
-    /// Creates a `Pattern32` from a code-style pattern
+	/// Creates a `Pattern32` from bytes without wildcards.
 	/// 
 	/// # Example
-	/// ```
-	/// let pattern = Pattern32::from_byte_mask(
-	///     &[0x90, 0xE8, 0x09, 0x00],
-	///     &['x', 'x', '?', '?']
-	/// );
-	/// ```
-	/// This will match memory sequences where the first two bytes are exactly `0x90 0xE8`
-	/// and the next two bytes can be any value.
-	///
-	/// # Panics
-	/// Panics if `bytes` and `mask` have different lengths.
+    /// ```rust
+    /// let pat = Pattern32::literal(b".?AV@DATA@@");
+    /// ```
+    pub fn literal(bytes: &[u8]) -> Self {
+        let mask = vec![0x00; bytes.len()];
+        Self::from_bytes(bytes.to_vec(), mask)
+    }
+
+    /// Creates a `Pattern32` from a code-style pattern
+    ///
+    /// # Example
+    /// ```
+    /// let pattern = Pattern32::from_byte_mask(
+    ///     &[0x90, 0xE8, 0x09, 0x00],
+    ///     &['x', 'x', '?', '?']
+    /// );
+    /// ```
+    /// This will match memory sequences where the first two bytes are exactly `0x90 0xE8`
+    /// and the next two bytes can be any value.
+    ///
+    /// # Panics
+    /// Panics if `bytes` and `mask` have different lengths.
     pub fn from_byte_mask(bytes: &[u8], mask: &[char]) -> Self {
-		assert_eq!(bytes.len(), mask.len(), "mismatched bytes & mask length");
+        assert_eq!(bytes.len(), mask.len(), "mismatched bytes & mask length");
 
         let not_mask = mask
             .iter()

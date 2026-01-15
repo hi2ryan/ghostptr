@@ -1,9 +1,9 @@
 [package]
 name = "ghostptr"
-version = "0.1.3"
+version = "0.1.4"
 edition = "2024"
 
-description = "Lightweight, ergonomic library for Windows procession interaction. "
+description = "Lightweight, ergonomic library for Windows process interaction. "
 readme = "README.md"
 repository = "https://github.com/hi2ryan/ghostptr"
 license = "MIT"
