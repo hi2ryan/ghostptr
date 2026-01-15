@@ -1,6 +1,6 @@
 use core::ops::Range;
 use crate::{
-    HandleObject, ProcessError, Result, Scanner, process::{FreeType, MemoryProtection, MemoryState, MemoryType, Process}, windows::{
+    HandleObject, ProcessError, Result, process::{FreeType, MemoryProtection, MemoryState, MemoryType, Process}, windows::{
         Handle,
         constants::{CURRENT_PROCESS_HANDLE, STATUS_INFO_LENGTH_MISMATCH},
         structs::{
