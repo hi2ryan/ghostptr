@@ -224,6 +224,7 @@ impl<'a, P: Process> Module<'a, P> {
         Err(ProcessError::ExportNotFound(name.to_string()))
     }
 
+	/// Parses all image section headers of the module.
     pub fn sections(&self) -> Result<Vec<Section>> {
         let nt_headers = self.nt_headers()?;
 
@@ -270,6 +271,20 @@ impl<'a, P: Process> Module<'a, P> {
 
         Ok(sections)
     }
+
+	/// Parses all the image section headers of the module and
+	/// searches for a matching section name.
+	pub fn get_section(&self, name: &str) -> Result<Section> {
+		if let Some(section) = self
+			.sections()?
+			.into_iter()
+			.find(|s| s.name == name)
+		{
+			Ok(section)
+		} else {
+			Err(ProcessError::SectionNotFound(name.to_owned()))
+		}
+	}
 
     #[inline(always)]
     pub fn virtual_range(&self) -> AddressRange {

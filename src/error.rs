@@ -1,4 +1,4 @@
-use core::fmt::{Display, Debug};
+use core::fmt::{Debug, Display};
 
 pub type Result<T> = core::result::Result<T, ProcessError>;
 
@@ -12,9 +12,10 @@ pub enum ProcessError {
 
     // modules
     ModuleNotFound(String),
-	MainModuleNotFound,
+    MainModuleNotFound,
     MalformedPE,
     ExportNotFound(String),
+    SectionNotFound(String),
 }
 
 impl Display for ProcessError {
@@ -40,7 +41,10 @@ impl Display for ProcessError {
 			ProcessError::MalformedPE =>
 				write!(f, "Malformed PE format"),
 			ProcessError::ExportNotFound(name) =>
-				write!(f, "Export '{name}' not found")
+				write!(f, "Export '{name}' not found"),
+			ProcessError::SectionNotFound(name) =>
+				write!(f, "Section '{name}' not found")
+
 		}
     }
 }
