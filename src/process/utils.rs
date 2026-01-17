@@ -1,6 +1,7 @@
-use core::ops::Range;
 use crate::{
-    HandleObject, ProcessError, Result, process::{FreeType, MemoryProtection, MemoryState, MemoryType, Process}, windows::{
+    HandleObject, ProcessError, Result,
+    process::{FreeType, MemoryProtection, MemoryState, MemoryType, Process},
+    windows::{
         Handle,
         constants::{CURRENT_PROCESS_HANDLE, STATUS_INFO_LENGTH_MISMATCH},
         structs::{
@@ -8,49 +9,123 @@ use crate::{
         },
         utils::unicode_to_string,
         wrappers::{nt_duplicate_object, nt_query_object},
-    }
+    },
 };
+use core::ops::Range;
 
 pub type AddressRange = Range<usize>;
 
+/// Represents queried information regarding region of virtual memory.
 #[derive(Debug, Clone)]
-pub struct MemoryInfo {
+pub struct MemoryRegionInfo {
+	/// The starting virtual address of this region.
     pub base_address: usize,
+
+	/// The base address of the allocation that this region belongs to.
     pub allocation_base: usize,
+
+	/// The protection flags that were specified when the allocation
+    /// was originally created.
+	/// 
+	/// This value does **not** change when the region's protection
+	/// is modified.
     pub allocation_protection: MemoryProtection,
+
+	/// The partition identifier for the memory region.
     pub partition_id: u16,
+
+	/// The size of this region in bytes.
     pub region_size: usize,
+
+	/// The current state of the memory region.
     pub state: MemoryState,
+
+	/// The current access protection of the region.
     pub protection: MemoryProtection,
+
+	/// The type of memory backing this region.
     pub r#type: MemoryType,
 }
 
-impl MemoryInfo {
-    #[inline]
+impl MemoryRegionInfo {
+	/// Returns `true` if this region is accessible.
+    ///
+    /// A region is considered accessible if:
+    /// - It is committed ([`MemoryState::COMMIT`])
+    /// - It is **not** marked as `NOACCESS` ([`MemoryProtection::NOACCESS`])
+    /// - It is **not** a guard page ([`MemoryProtection::GUARD`])
+    ///
+    /// This is a prerequisite for any read, write, or execute operation.
+    #[inline(always)]
+    pub fn is_accessible(&self) -> bool {
+        self.state.contains(MemoryState::COMMIT)
+            && !self
+                .protection
+                .intersects(MemoryProtection::NOACCESS | MemoryProtection::GUARD)
+    }
+
+	/// Returns `true` if this region can be safely read from.
+    ///
+    /// This implies:
+    /// - The region is accessible
+    /// - The protection flags include any readable permission
+    #[inline(always)]
     pub fn is_readable(&self) -> bool {
-        if self.state != MemoryState::COMMIT {
-            return false;
-        }
+        self.is_accessible()
+            && self.protection.intersects(
+                MemoryProtection::READONLY
+                    | MemoryProtection::READWRITE
+                    | MemoryProtection::WRITECOPY
+                    | MemoryProtection::EXECUTE_READ
+                    | MemoryProtection::EXECUTE_READWRITE
+                    | MemoryProtection::EXECUTE_WRITECOPY,
+            )
+    }
 
-        let protection = self.protection;
-        if protection.contains(MemoryProtection::NOACCESS)
-            || protection.contains(MemoryProtection::GUARD)
-        {
-            return false;
-        }
+	/// Returns `true` if this region can be written to.
+    ///
+    /// This implies:
+    /// - The region is accessible
+    /// - The protection flags allow writing, either directly or via
+    ///   copy-on-write semantics
+    #[inline(always)]
+    pub fn is_writable(&self) -> bool {
+        self.is_accessible()
+            && self.protection.intersects(
+                MemoryProtection::READWRITE
+                    | MemoryProtection::WRITECOPY
+                    | MemoryProtection::EXECUTE_READWRITE
+                    | MemoryProtection::EXECUTE_WRITECOPY,
+            )
+    }
 
-        protection.intersects(
-            MemoryProtection::READONLY
-                | MemoryProtection::READWRITE
-                | MemoryProtection::WRITECOPY
-                | MemoryProtection::EXECUTE_READ
-                | MemoryProtection::EXECUTE_READWRITE
-                | MemoryProtection::EXECUTE_WRITECOPY,
-        )
+	/// Returns `true` if this region contains executable code.
+    ///
+    /// This implies:
+    /// - The region is accessible
+    /// - The protection flags allow execution, with or without
+    ///   read/write permissions
+    #[inline(always)]
+    pub fn is_executable(&self) -> bool {
+        self.is_accessible()
+            && self.protection.intersects(
+                MemoryProtection::EXECUTE
+                    | MemoryProtection::EXECUTE_READ
+                    | MemoryProtection::EXECUTE_READWRITE
+                    | MemoryProtection::EXECUTE_WRITECOPY,
+            )
+    }
+
+	/// Returns the virtual address range covered by this memory region.
+    #[inline(always)]
+    pub fn virtual_range(&self) -> AddressRange {
+        let end = self.base_address.saturating_add(self.region_size as usize);
+        self.base_address..end
     }
 }
 
-impl From<MemoryBasicInformation> for MemoryInfo {
+impl From<MemoryBasicInformation> for MemoryRegionInfo {
+	#[inline(always)]
     fn from(value: MemoryBasicInformation) -> Self {
         Self {
             base_address: value.base_address as _,
@@ -189,6 +264,7 @@ impl<'a, P: Process> ProcessHandleInfo<'a, P> {
         Ok(unicode_to_string(&info.type_name))
     }
 
+    #[inline(always)]
     pub(crate) fn from_entry(
         process: &'a P,
         entry: ProcessHandleEntry,
@@ -206,6 +282,7 @@ impl<'a, P: Process> ProcessHandleInfo<'a, P> {
 }
 
 impl<'a, P: Process> Into<HandleObject> for ProcessHandleInfo<'a, P> {
+    #[inline(always)]
     fn into(self) -> HandleObject {
         HandleObject::from_handle(self.handle)
     }
@@ -213,7 +290,7 @@ impl<'a, P: Process> Into<HandleObject> for ProcessHandleInfo<'a, P> {
 
 /// Represents an allocated region in a process' memory.
 #[derive(Debug, Clone)]
-pub struct MemoryRegion<'a, P: Process + ?Sized> {
+pub struct MemoryAllocation<'a, P: Process + ?Sized> {
     pub(crate) process: &'a P,
 
     pub address: usize,
@@ -222,19 +299,19 @@ pub struct MemoryRegion<'a, P: Process + ?Sized> {
     pub region_size: usize,
 }
 
-impl<'a, P: Process> MemoryRegion<'a, P> {
+impl<'a, P: Process> MemoryAllocation<'a, P> {
     #[inline(always)]
     pub fn free(&self, r#type: FreeType) -> Result<()> {
         self.process.free_mem(self.address, self.size, r#type)
     }
 
-	#[inline(always)]
-	pub fn write<T>(&self, offset: usize, value: &T) -> Result<()> {
-		self.process.write_mem(self.address + offset, value)
-	}
+    #[inline(always)]
+    pub fn write<T>(&self, offset: usize, value: &T) -> Result<()> {
+        self.process.write_mem(self.address + offset, value)
+    }
 
-	#[inline(always)]
-	pub fn read<T: Copy>(&self, offset: usize) -> Result<T> {
-		self.process.read_mem(self.address + offset)
-	}
+    #[inline(always)]
+    pub fn read<T: Copy>(&self, offset: usize) -> Result<T> {
+        self.process.read_mem(self.address + offset)
+    }
 }

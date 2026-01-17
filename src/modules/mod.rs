@@ -1,9 +1,14 @@
-use core::ffi::CStr;
-use core::mem::offset_of;
+pub mod section;
+pub mod export;
 
+pub use section::Section;
+pub use export::Export;
+
+use core::{mem::offset_of, ffi::CStr};
 use crate::{
     ProcessError, Result, SectionCharacteristics,
-    process::{Process, Scanner, utils::AddressRange},
+	Scanner,
+    process::{MemoryRegionIter, Process, utils::AddressRange},
     windows::{
         DllEntryPoint,
         structs::{
@@ -12,54 +17,9 @@ use crate::{
     },
 };
 
-/// Represents an image section header from a PE module
-#[derive(Debug)]
-pub struct Section {
-    pub name: String,
-    pub size: u32,
-    pub address: usize,
-    pub characteristics: SectionCharacteristics,
-}
-
-impl Section {
-    pub fn virtual_range(&self) -> AddressRange {
-        let start = self.address;
-        let size = self.size as usize;
-        start..(start + size)
-    }
-}
-
-/// Represents an exported symbol from a PE module's Export Address Table.
-///
-/// Exports can be:
-/// 	- Named
-/// 	- Ordinal-only (no name)
-/// 	- Forwarded to another module
-#[derive(Debug)]
-pub struct Export {
-    /// The name of the exported symbol, if present.
-    pub name: Option<String>,
-
-    /// The export ordinal.
-    pub ordinal: u16,
-
-    /// The resolved virtual address of the exported function.
-    /// This will be `0` if the export is forwarded.
-    pub address: usize,
-
-    /// The forwarder target, if this export is forwarded.
-    ///
-    /// The ASCII string's format is:
-    /// ```text
-    /// MODULE.NAME
-    /// MODULE.#ORDINAL
-    /// ```
-    pub forwarded_to: Option<String>,
-}
-
 /// A view of a module loaded in a process (local or remote).
 #[derive(Debug)]
-pub struct Module<'a, P: Process> {
+pub struct Module<'a, P: Process + ?Sized> {
     pub(crate) process: &'a P,
 
     /// Full path to the module.
@@ -84,6 +44,25 @@ pub struct Module<'a, P: Process> {
 }
 
 impl<'a, P: Process> Module<'a, P> {
+	/// Returns the virtual address range covered by this module.
+	#[inline(always)]
+    pub fn virtual_range(&self) -> AddressRange {
+		self.base_address..(self.base_address + self.image_size as usize)
+    }
+
+	/// Scans virtual memory in the process according to the
+	/// virtual address range covered by this module.
+	#[inline(always)]
+    pub fn scan_mem<S: Scanner>(&self, pattern: &S) -> impl Iterator<Item = usize> {
+        self.process.scan_mem(self.virtual_range(), pattern)
+    }
+
+	/// Returns an iterator over the memory regions that intersect this section.
+	#[inline(always)]
+    pub fn mem_regions(&self) -> MemoryRegionIter<P> {
+        MemoryRegionIter::new(self.process, self.virtual_range())
+    }
+
     /// Enumerates all exports from this module.
     ///
     /// Parses the PE headers in the target process, walks the export
@@ -97,7 +76,7 @@ impl<'a, P: Process> Module<'a, P> {
     /// - [`ProcessError::MalformedPE`] if the module appears to have no
     /// export directory or the PE headers are inconsistent.
     /// - [`ProcessError::NtStatus`] if reading memory fails.
-    pub fn get_exports(&self) -> Result<Vec<Export>> {
+    pub fn exports(&self) -> Result<Vec<Export>> {
         // self.base_address is the ImageDosHeader
         // e_lfanew is the rva to the ImageNtHeaders64
         let nt_headers_offset: u32 = self
@@ -225,7 +204,7 @@ impl<'a, P: Process> Module<'a, P> {
     }
 
 	/// Parses all image section headers of the module.
-    pub fn sections(&self) -> Result<Vec<Section>> {
+    pub fn sections(&self) -> Result<Vec<Section<P>>> {
         let nt_headers = self.nt_headers()?;
 
         // ImageNtHeaders64->FileHeader 	 +0x4
@@ -261,6 +240,8 @@ impl<'a, P: Process> Module<'a, P> {
                     SectionCharacteristics::from_bits_retain(section.characteristics);
 
                 sections.push(Section {
+					module: &self,
+
                     name,
                     address: address,
                     size: size,
@@ -274,7 +255,7 @@ impl<'a, P: Process> Module<'a, P> {
 
 	/// Parses all the image section headers of the module and
 	/// searches for a matching section name.
-	pub fn get_section(&self, name: &str) -> Result<Section> {
+	pub fn get_section(&self, name: &str) -> Result<Section<P>> {
 		if let Some(section) = self
 			.sections()?
 			.into_iter()
@@ -285,15 +266,6 @@ impl<'a, P: Process> Module<'a, P> {
 			Err(ProcessError::SectionNotFound(name.to_owned()))
 		}
 	}
-
-    #[inline(always)]
-    pub fn virtual_range(&self) -> AddressRange {
-		self.base_address..(self.base_address + self.image_size as usize)
-    }
-
-    pub fn pattern_scan<S: Scanner>(&self, pattern: &S) -> Result<Vec<usize>> {
-        self.process.scan_mem(self.virtual_range(), pattern)
-    }
 
     fn nt_headers(&self) -> Result<usize> {
         // self.base_address is the ImageDosHeader
@@ -350,8 +322,9 @@ impl<'a, P: Process> Module<'a, P> {
 #[cfg(test)]
 mod tests {
     use crate::{
-        iter::module::ModuleIterOrder,
-        process::{Process, ProcessAccess, Result, remote::RemoteProcess},
+        ModuleIterOrder,
+		Result,
+        Process, ProcessAccess, RemoteProcess,
     };
 
     #[test]

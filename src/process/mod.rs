@@ -1,19 +1,18 @@
 pub mod current;
-pub mod module;
-pub mod pattern;
 pub mod ptr;
 pub mod remote;
 pub mod thread;
 pub mod utils;
+pub mod region;
 
-pub use crate::windows::flags::*;
+pub use crate::{windows::flags::*};
+use crate::{modules::Module, patterns::Scanner};
+pub use region::MemoryRegionIter;
 pub use current::CurrentProcess;
-pub use module::{Export, Module};
-pub use pattern::{Pattern16, Pattern32, Scanner};
 pub use ptr::AsPointer;
 pub use remote::RemoteProcess;
 pub use thread::Thread;
-pub use utils::{AddressRange, MemoryInfo, MemoryRegion, ProcessHandleInfo};
+pub use utils::{AddressRange, MemoryRegionInfo, MemoryAllocation, ProcessHandleInfo};
 
 use crate::{
     Result,
@@ -116,9 +115,7 @@ pub trait Process {
     ///
     /// Returns [`crate::ProcessError::NtStatus`] if the module enumeration fails,
     /// potentially due to insufficient access rights.
-    fn main_module(&self) -> Result<Module<Self>>
-    where
-        Self: Sized;
+    fn main_module(&self) -> Result<Module<Self>>;
 
     /// Enumerates the modules within the process and finds
     /// a module matching the `name` provided.
@@ -139,9 +136,7 @@ pub trait Process {
     ///
     /// Returns [`crate::ProcessError::NtStatus`] if the module enumeration fails,
     /// potentially due to insufficient access rights.
-    fn get_module(&self, name: &str) -> Result<Module<Self>>
-    where
-        Self: Sized;
+    fn get_module(&self, name: &str) -> Result<Module<Self>>;
 
     /// Lists the modules within the process.
     ///
@@ -305,7 +300,7 @@ pub trait Process {
     ///
     /// Returns [`crate::ProcessError::NtStatus`] if querying the memory fails,
     /// potentially due to insufficient access rights.
-    fn query_mem(&self, address: impl AsPointer) -> Result<MemoryInfo>;
+    fn query_mem(&self, address: impl AsPointer) -> Result<MemoryRegionInfo>;
 
     /// Changes the protection on a region of virtual memory in the process.
     /// Returns the region's previous protection.
@@ -360,7 +355,7 @@ pub trait Process {
         size: usize,
         r#type: AllocationType,
         protection: MemoryProtection,
-    ) -> Result<MemoryRegion<Self>>;
+    ) -> Result<MemoryAllocation<Self>>;
 
     /// Frees allocated virtual memory in the process.
     ///
@@ -383,18 +378,15 @@ pub trait Process {
     /// potentially due to insufficient access rights.
     fn free_mem(&self, address: impl AsPointer, size: usize, r#type: FreeType) -> Result<()>;
 
-	/// Scans virtual memory in the process
-	/// According to the `AddressRange` `range`.
-	///
-    /// The address may be provided as any type implementing [`AsPointer`],
-    /// such as a raw pointer or integer address.
+    /// Scans virtual memory in the process according to the `range`.
     ///
     /// # Access Rights
     ///
     /// If this is a remote process, this method
     /// requires the process handle access mask to include:
     ///
-    /// - [`ProcessAccess::VM_READ`]
+    /// - [`ProcessAccess::VM_READ`], **and**
+    /// - [`ProcessAccess::QUERY_INFORMATION`]
     ///
     /// Without this right, the system call will fail with an
     /// `NTSTATUS` error.
@@ -403,5 +395,23 @@ pub trait Process {
     ///
     /// Returns [`crate::ProcessError::NtStatus`] if reading the memory fails,
     /// potentially due to insufficient access rights.
-    fn scan_mem<S: Scanner>(&self, range: AddressRange, pattern: &S) -> Result<Vec<usize>>;
+    fn scan_mem<S: Scanner>(&self, range: AddressRange, pattern: &S) -> impl Iterator<Item = usize>;
+	/// Returns an iterator over the memory regions that intersect `range`.
+	/// 
+	/// # Access Rights
+    ///
+    /// If this is a remote process, this method
+    /// requires the process handle access mask to include:
+    ///
+    /// - [`ProcessAccess::VM_READ`], **and**
+    /// - [`ProcessAccess::QUERY_INFORMATION`]
+    ///
+    /// Without this right, the system call will fail with an
+    /// `NTSTATUS` error.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::ProcessError::NtStatus`] if reading or
+	/// querying the memory fails, potentially due to insufficient access rights.
+	fn mem_regions(&self, range: AddressRange) -> MemoryRegionIter<Self>;
 }

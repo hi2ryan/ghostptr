@@ -1,15 +1,14 @@
 use crate::{
-    ProcessError, Result, ThreadAccess, ThreadCreateFlags,
+    Module, ProcessError, Result, ThreadAccess, ThreadCreateFlags,
     iter::{
         module::{ModuleIterOrder, ModuleIterator},
         process::ProcessIterator,
         thread::ThreadView,
     },
     process::{
-        AsPointer, AllocationType, FreeType, MemoryProtection, Process, Scanner,
-        module::Module,
+        AllocationType, AsPointer, FreeType, MemoryProtection, MemoryRegionIter, Process, Scanner,
         thread::Thread,
-        utils::{AddressRange, MemoryInfo, MemoryRegion},
+        utils::{AddressRange, MemoryAllocation, MemoryRegionInfo},
     },
     windows::{
         Handle, NtStatus,
@@ -59,7 +58,7 @@ impl CurrentProcess {
 impl Process for CurrentProcess {
     /// Returns the pseudo handle (`-1`) of the current process.
     #[inline(always)]
-	unsafe fn handle(&self) -> Handle {
+    unsafe fn handle(&self) -> Handle {
         -1isize as Handle
     }
 
@@ -331,7 +330,7 @@ impl Process for CurrentProcess {
     ///
     /// The address may be provided as any type implementing [`AsPointer<u8>`],
     /// such as a raw pointer or integer address.
-    fn query_mem(&self, address: impl AsPointer) -> Result<MemoryInfo> {
+    fn query_mem(&self, address: impl AsPointer) -> Result<MemoryRegionInfo> {
         let mut memory_info: MaybeUninit<MemoryBasicInformation> = MaybeUninit::uninit();
 
         let status = nt_query_virtual_memory(
@@ -348,7 +347,7 @@ impl Process for CurrentProcess {
         }
 
         let raw_info = unsafe { memory_info.assume_init() };
-        Ok(MemoryInfo::from(raw_info))
+        Ok(MemoryRegionInfo::from(raw_info))
     }
 
     /// Changes the protection on a region of virtual memory in the process.
@@ -395,7 +394,7 @@ impl Process for CurrentProcess {
         size: usize,
         r#type: AllocationType,
         protection: MemoryProtection,
-    ) -> Result<MemoryRegion<Self>> {
+    ) -> Result<MemoryAllocation<Self>> {
         let mut base_address = address.unwrap_or(0);
         let mut region_size = size;
 
@@ -412,7 +411,7 @@ impl Process for CurrentProcess {
             return Err(ProcessError::NtStatus(status));
         }
 
-        Ok(MemoryRegion {
+        Ok(MemoryAllocation {
             process: &self,
 
             address: base_address,
@@ -447,69 +446,52 @@ impl Process for CurrentProcess {
         Ok(())
     }
 
-	/// Scans virtual memory in the process
-	/// According to the `AddressRange` `range`.
-	///
-    /// The address may be provided as any type implementing [`AsPointer`],
-    /// such as a raw pointer or integer address.
-    ///
-    /// # Access Rights
-    ///
-    /// If this is a remote process, this method
-    /// requires the process handle access mask to include:
-    ///
-    /// - [`ProcessAccess::VM_READ`]
-    ///
-    /// Without this right, the system call will fail with an
-    /// `NTSTATUS` error.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`crate::ProcessError::NtStatus`] if reading the memory fails,
-    /// potentially due to insufficient access rights.
-    fn scan_mem<S: Scanner>(&self, range: AddressRange, pattern: &S) -> Result<Vec<usize>> {
-        let mut results = Vec::new();
+    //// Scans virtual memory in the process according to the `range`.
+    fn scan_mem<S: Scanner>(
+        &self,
+        range: AddressRange,
+        pattern: &S,
+    ) -> impl Iterator<Item = usize> {
+        let mut regions = self.mem_regions(range.clone()).into_iter();
+        let mut results = Vec::<usize>::new().into_iter();
 
-        let mut curr_addr = range.start;
-        let end_addr = range.end;
+        core::iter::from_fn(move || {
+            loop {
+                if let Some(res) = results.next() {
+                    return Some(res);
+                }
 
-        loop {
-            if curr_addr > end_addr {
-                break;
-            }
-
-            let info = match self.query_mem(curr_addr) {
-                Ok(info) => info,
-                Err(_) => {
-                    // query failed
-                    // move a page forward
-                    curr_addr += 0x1000;
+                let info = regions.next()?;
+                if !info.is_readable() {
                     continue;
                 }
-            };
 
-            if info.region_size == 0 {
-                break;
-            }
+                let region_start = info.base_address;
+                let region_end = info.base_address.saturating_add(info.region_size);
 
-            if !info.is_readable() {
-                // skip unreadable region
-                curr_addr += info.region_size;
-                continue;
-            }
+                let start = range.start.max(region_start);
+                let end = range.end.min(region_end);
+                if start >= end {
+                    continue;
+                }
 
-            let read_size = info.region_size.min(end_addr - curr_addr);
-
-            if let Ok(region) = self.read_slice::<u8>(curr_addr, read_size) {
-                for offset in pattern.scan_bytes(&region) {
-                    results.push(curr_addr + offset);
+                let read_size = end - start;
+                if let Ok(bytes) = self.read_slice::<u8>(start, read_size) {
+                    results = pattern
+                        .scan_bytes(&bytes)
+                        .into_iter()
+                        .map(|off| start + off)
+                        .collect::<Vec<usize>>()
+                        .into_iter();
                 }
             }
+        })
+    }
 
-            curr_addr += info.region_size;
-        }
-
-        Ok(results)
+    /// Returns an iterator over the memory regions that intersect `range`.
+    #[inline(always)]
+    fn mem_regions(&self, range: AddressRange) -> MemoryRegionIter<Self> {
+        MemoryRegionIter::new(&self, range)
     }
 }
 
@@ -550,24 +532,28 @@ mod test {
         Ok(())
     }
 
-	#[test]
+    #[test]
     fn module_exports() -> Result<()> {
         let ntdll = CurrentProcess
             .modules(ModuleIterOrder::Load)?
             .skip(1)
             .next()
             .expect("failed to get first module of remote process");
-		
-		unsafe extern "system" {
-			fn GetProcAddress(module: usize, name: *const u8) -> usize;
-		}
-		
-		let nt_open_process = ntdll.get_export("NtOpenProcess")?;
-		let nt_open_process2 = unsafe { GetProcAddress(ntdll.base_address, b"NtOpenProcess\0".as_ptr()) };
 
-		assert_eq!(nt_open_process, nt_open_process2, "failed to get current process' ntdll export: 'NtOpenProcess'");
+        unsafe extern "system" {
+            fn GetProcAddress(module: usize, name: *const u8) -> usize;
+        }
 
-		Ok(())
+        let nt_open_process = ntdll.get_export("NtOpenProcess")?;
+        let nt_open_process2 =
+            unsafe { GetProcAddress(ntdll.base_address, b"NtOpenProcess\0".as_ptr()) };
+
+        assert_eq!(
+            nt_open_process, nt_open_process2,
+            "failed to get current process' ntdll export: 'NtOpenProcess'"
+        );
+
+        Ok(())
     }
 
     #[test]
@@ -593,7 +579,7 @@ mod test {
             ssn_bytes
         ));
 
-        let results = ntdll.pattern_scan(&pat)?;
+        let results = ntdll.scan_mem(&pat).collect::<Vec<usize>>();
         assert!(
             results.len() == 1,
             "failed to find match NtOpenProcess syscall pattern"

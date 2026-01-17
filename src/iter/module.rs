@@ -1,6 +1,6 @@
 use crate::{
-    Result,
-    process::{Process, module::Module},
+    Module, Result,
+    process::Process,
     windows::{
         structs::{LdrModule, ListEntry, PebLoaderData, ProcessEnvBlock},
         utils::{query_process_basic_info, unicode_to_string_remote},
