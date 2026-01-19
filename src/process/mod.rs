@@ -4,15 +4,18 @@ pub mod remote;
 pub mod thread;
 pub mod utils;
 pub mod region;
+pub mod scan;
 
 pub use crate::{windows::flags::*};
-use crate::{modules::Module, patterns::Scanner};
+pub use scan::MemScanIter;
 pub use region::MemoryRegionIter;
 pub use current::CurrentProcess;
 pub use ptr::AsPointer;
 pub use remote::RemoteProcess;
 pub use thread::Thread;
 pub use utils::{AddressRange, MemoryRegionInfo, MemoryAllocation, ProcessHandleInfo};
+
+use crate::{modules::Module, patterns::Scanner};
 
 use crate::{
     Result,
@@ -30,6 +33,24 @@ pub trait Process {
     /// If it is a remote process, the handle will be closed as soon
     /// as the `RemoteProcess` struct is dropped.
     unsafe fn handle(&self) -> Handle;
+
+	/// Queries the handles that the process has open.
+    ///
+    /// # Access Rights
+    ///
+    /// If this is a remote process, this method
+	/// requires the process handle access mask to include:
+    ///
+    /// - [`ProcessAccess::QUERY_INFORMATION`]
+    ///
+    /// Without this right, the system call will fail with an
+    /// `NTSTATUS` error.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ProcessError::NtStatus`] if querying handle information fails,
+    /// potentially due to insufficient access rights.
+    fn handles(&self) -> Result<Vec<ProcessHandleInfo<Self>>>;
 
     /// Terminates the process.
     ///
@@ -91,7 +112,7 @@ pub trait Process {
         access: ThreadAccess,
         start_routine: *mut core::ffi::c_void,
         argument: *mut core::ffi::c_void,
-        flags: ThreadCreateFlags,
+        flags: ThreadCreationFlags,
     ) -> Result<Thread>;
 
     /* MODULES */
@@ -117,8 +138,8 @@ pub trait Process {
     /// potentially due to insufficient access rights.
     fn main_module(&self) -> Result<Module<Self>>;
 
-    /// Enumerates the modules within the process and finds
-    /// a module matching the `name` provided.
+    //// Enumerates the modules within the process and finds
+	/// a module matching the `name` provided, **case-insensitive**.
     ///
     /// # Access Rights
     ///
@@ -395,7 +416,8 @@ pub trait Process {
     ///
     /// Returns [`crate::ProcessError::NtStatus`] if reading the memory fails,
     /// potentially due to insufficient access rights.
-    fn scan_mem<S: Scanner>(&self, range: AddressRange, pattern: &S) -> impl Iterator<Item = usize>;
+    fn scan_mem<'a, S: Scanner>(&'a self, range: AddressRange, pattern: &'a S) -> MemScanIter<'a, Self, S>;
+	
 	/// Returns an iterator over the memory regions that intersect `range`.
 	/// 
 	/// # Access Rights

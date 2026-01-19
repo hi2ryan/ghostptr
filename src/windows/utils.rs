@@ -188,7 +188,7 @@ pub fn query_process_basic_info(handle: Handle) -> Result<ProcessBasicInformatio
     Ok(info)
 }
 
-pub fn query_process_handles(handle: Handle) -> Result<Vec<u8>> {
+pub fn query_process_handle_info(handle: Handle) -> Result<Vec<u8>> {
     let mut len: u32 = 0x100;
 
     loop {

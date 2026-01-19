@@ -1,20 +1,19 @@
 pub mod section;
 pub mod export;
+pub mod import;
 
-pub use section::Section;
-pub use export::Export;
+pub use section::*;
+pub use export::*;
+pub use import::*;
 
 use core::{mem::offset_of, ffi::CStr};
 use crate::{
-    ProcessError, Result, SectionCharacteristics,
-	Scanner,
-    process::{MemoryRegionIter, Process, utils::AddressRange},
-    windows::{
+    MemScanIter, ProcessError, Result, Scanner, SectionCharacteristics, process::{MemoryRegionIter, Process, utils::AddressRange}, windows::{
         DllEntryPoint,
         structs::{
-            ImageDataDirectory, ImageDosHeader, ImageExportDirectory, ImageNtHeaders64, ImageOptionalHeader64, ImageSectionHeader
+            ImageDataDirectory, ImageDosHeader, ImageExportDirectory, ImageImportDescriptor, ImageNtHeaders64, ImageOptionalHeader64, ImageSectionHeader
         },
-    },
+    }
 };
 
 /// A view of a module loaded in a process (local or remote).
@@ -50,14 +49,26 @@ impl<'a, P: Process> Module<'a, P> {
 		self.base_address..(self.base_address + self.image_size as usize)
     }
 
+	/// Checks whether an address lies within the virtual address range of this module.
+	#[inline(always)]
+	pub fn contains(&self, address: &usize) -> bool {
+		self.virtual_range().contains(address)
+	}
+
+	/// Offsets an RVA (relative virtual address) to a VA (virtual address)
+	#[inline(always)]
+	pub fn offset(&self, rva: usize) -> usize {
+		self.base_address + rva
+	}
+
 	/// Scans virtual memory in the process according to the
 	/// virtual address range covered by this module.
 	#[inline(always)]
-    pub fn scan_mem<S: Scanner>(&self, pattern: &S) -> impl Iterator<Item = usize> {
+    pub fn scan_mem<S: Scanner>(&'a self, pattern: &'a S) -> MemScanIter<'a, P, S> {
         self.process.scan_mem(self.virtual_range(), pattern)
     }
 
-	/// Returns an iterator over the memory regions that intersect this section.
+	/// Returns an iterator over the memory regions that intersect this module.
 	#[inline(always)]
     pub fn mem_regions(&self) -> MemoryRegionIter<P> {
         MemoryRegionIter::new(self.process, self.virtual_range())
@@ -174,7 +185,7 @@ impl<'a, P: Process> Module<'a, P> {
     ///
     /// - [`ProcessError::MalformedPE`] if the export directory cannot be located.
     /// - [`ProcessError::ExportNotFound`] if no export with the given name exists in this module.
-    /// - [`ProcessError::NtStatus`] if reading the memory fails.
+    /// - [`ProcessError::NtStatus`] if reading memory fails.
     pub fn get_export(&self, name: &str) -> Result<usize> {
         let export_directory = self.get_export_dir()?;
         if export_directory.number_of_names == 0 {
@@ -202,6 +213,75 @@ impl<'a, P: Process> Module<'a, P> {
 
         Err(ProcessError::ExportNotFound(name.to_string()))
     }
+
+	/// Parses and returns all imports from this PE module.
+	///
+	/// Walks the import directory of the module's PE header, reading
+	/// all imported DLL names and their functions (by name or ordinal).
+	///
+	/// # Errors
+	/// - [`ProcessError::MalformedPE`] if the module appears to have no
+	/// import directory or the PE headers are invalid.
+	/// - [`ProcessError::NtStatus`] if reading memory fails.
+	pub fn imports(&self) -> Result<Vec<Import>> {
+		let mut imports = Vec::new();
+		
+		// iterate import descriptors
+		let mut curr_import = self.get_first_import_addr()?;
+		loop {
+			let descriptor: ImageImportDescriptor = self.process.read_mem(curr_import)?;
+			if descriptor.original_first_thunk == 0 && descriptor.first_thunk == 0 {
+				break;
+			}
+
+			// read the name of the imported dll
+			let dll_name = self.process.read_c_string(
+				self.base_address + descriptor.name as usize,
+				None
+			)?;
+
+			let mut functions = Vec::new();
+
+			// read initial thunk RVA
+			let thunk_rva = if descriptor.original_first_thunk != 0 {
+				descriptor.original_first_thunk
+			} else {
+				descriptor.first_thunk
+			};
+
+			// iterate thunks
+			let mut curr_thunk = (self.base_address + thunk_rva as usize) as *const usize;
+			loop {
+				// read thunk value
+				let thunk = self.process.read_mem(curr_thunk)?;
+				if thunk == 0 {
+					break;
+				}
+
+				let is_ordinal = (thunk & 0x8000000000000000) != 0;
+				if is_ordinal {
+					// ordinal import
+					let ordinal = (thunk & 0xFFFF) as u16;
+					functions.push(ImportType::Ordinal(ordinal));
+				} else {
+					// name import
+
+					// thunk value is an RVA to import by name
+					// skip the first 2 bytes (hint)
+					let name_addr = self.base_address + thunk + size_of::<u16>();
+					let name = self.process.read_c_string(name_addr, Some(256))?;
+					functions.push(ImportType::Name(name));
+				}
+
+				curr_thunk = unsafe { curr_thunk.add(1) };
+			}
+
+			imports.push(Import { dll_name, functions });
+			curr_import = unsafe { curr_import.add(1) };
+		}
+
+		Ok(imports)
+	}
 
 	/// Parses all image section headers of the module.
     pub fn sections(&self) -> Result<Vec<Section<P>>> {
@@ -237,7 +317,7 @@ impl<'a, P: Process> Module<'a, P> {
                 let address = self.base_address + address_rva as usize;
                 let size = unsafe { section.misc.virtual_size };
                 let characteristics =
-                    SectionCharacteristics::from_bits_retain(section.characteristics);
+                    SectionCharacteristics::from_bits(section.characteristics);
 
                 sections.push(Section {
 					module: &self,
@@ -293,6 +373,21 @@ impl<'a, P: Process> Module<'a, P> {
             .read_mem(self.base_address + export_dir_rva as usize)
     }
 
+	fn get_first_import_addr(&self) -> Result<*const ImageImportDescriptor> {
+        let nt_headers_ptr = self.nt_headers()?;
+
+        // ImageNtHeaders64->ImageOptionalHeader64      +0x18
+        // ImageOptionalHeader64->ImageDataDirectory    +0x70
+		// ImageDataDirectory[1]                        +0x8
+        // ImageDataDirectory->VirtualAddress		    +0x0
+		let import_dir_rva: u32 = self.process.read_mem(nt_headers_ptr + 0x18 + 0x70 + 0x8)?;
+	    if import_dir_rva == 0 {
+            return Err(ProcessError::MalformedPE);
+        }
+
+        Ok((self.base_address + import_dir_rva as usize) as *const ImageImportDescriptor)
+    }
+
     fn resolve_exports(
         &self,
         export_directory: ImageExportDirectory,
@@ -321,15 +416,11 @@ impl<'a, P: Process> Module<'a, P> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        ModuleIterOrder,
-		Result,
-        Process, ProcessAccess, RemoteProcess,
-    };
+    use crate::*;
 
     #[test]
     fn get_remote_module_export() -> Result<()> {
-        let process = RemoteProcess::open_first_named("Discord.exe", ProcessAccess::ALL_ACCESS)?;
+        let process = RemoteProcess::open_first_named("Discord.exe", ProcessAccess::ALL)?;
         let ntdll = process
             .modules(ModuleIterOrder::Initialization)?
             .next()
@@ -364,7 +455,7 @@ mod tests {
 
     #[test]
     fn get_remote_module_sections() -> Result<()> {
-        let process = RemoteProcess::open_first_named("Discord.exe", ProcessAccess::ALL_ACCESS)?;
+        let process = RemoteProcess::open_first_named("Discord.exe", ProcessAccess::ALL)?;
         let ntdll = process
             .modules(ModuleIterOrder::Initialization)?
             .next()
@@ -376,4 +467,21 @@ mod tests {
 
         Ok(())
     }
+
+	#[test]
+	fn get_module_imports() -> Result<()> {
+		let kernel32 = CurrentProcess.get_module("kernel32.dll")?;
+		let imports = kernel32.imports()?;
+
+		assert!(!imports.is_empty(), "no imports found for kernel32.dll");
+
+		let ntdll_imports = imports.iter().find(|import| import.dll_name == "ntdll.dll");
+		assert!(ntdll_imports.is_some(), "ntdll.dll not found in kernel32.dll imports");
+		assert!(
+			ntdll_imports.unwrap().functions.contains(&ImportType::Name("NtClose".to_owned())),
+			"NtClose not found in kernel32.dll imports from ntdll.dll"
+		);
+
+		Ok(())
+	}
 }

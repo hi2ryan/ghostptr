@@ -16,6 +16,10 @@ pub enum ProcessError {
     MalformedPE,
     ExportNotFound(String),
     SectionNotFound(String),
+
+	// rtti
+	#[cfg(feature = "rtti")]
+	TypeNotFound(String),
 }
 
 impl Display for ProcessError {
@@ -43,8 +47,12 @@ impl Display for ProcessError {
 			ProcessError::ExportNotFound(name) =>
 				write!(f, "Export '{name}' not found"),
 			ProcessError::SectionNotFound(name) =>
-				write!(f, "Section '{name}' not found")
+				write!(f, "Section '{name}' not found"),
 
+			// rtti
+			#[cfg(feature = "rtti")]
+			ProcessError::TypeNotFound(name)  =>
+				write!(f, "RTTI Type '{name}' not found")
 		}
     }
 }

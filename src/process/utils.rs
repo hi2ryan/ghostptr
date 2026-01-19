@@ -5,9 +5,10 @@ use crate::{
         Handle,
         constants::{CURRENT_PROCESS_HANDLE, STATUS_INFO_LENGTH_MISMATCH},
         structs::{
-            MemoryBasicInformation, ProcessHandleEntry, PublicObjectTypeInformation, UnicodeString,
+            MemoryBasicInformation, ProcessHandleEntry, ProcessHandleSnapshotInformation,
+            PublicObjectTypeInformation, UnicodeString,
         },
-        utils::unicode_to_string,
+        utils::{query_process_handle_info, unicode_to_string},
         wrappers::{nt_duplicate_object, nt_query_object},
     },
 };
@@ -15,40 +16,55 @@ use core::ops::Range;
 
 pub type AddressRange = Range<usize>;
 
+#[inline(always)]
+pub fn get_process_handle_info<P: Process>(process: &P) -> Result<Vec<ProcessHandleInfo<P>>> {
+    let buf = query_process_handle_info(unsafe { process.handle() })?;
+    unsafe {
+        let snapshot = buf.as_ptr() as *const ProcessHandleSnapshotInformation;
+        let count = (*snapshot).handle_count as usize;
+        let entries_ptr = (*snapshot).handles.as_ptr();
+        let entries = core::slice::from_raw_parts(entries_ptr, count);
+        Ok(entries
+            .iter()
+            .map(|e| ProcessHandleInfo::from_entry(process, *e))
+            .collect())
+    }
+}
+
 /// Represents queried information regarding region of virtual memory.
 #[derive(Debug, Clone)]
 pub struct MemoryRegionInfo {
-	/// The starting virtual address of this region.
+    /// The starting virtual address of this region.
     pub base_address: usize,
 
-	/// The base address of the allocation that this region belongs to.
+    /// The base address of the allocation that this region belongs to.
     pub allocation_base: usize,
 
-	/// The protection flags that were specified when the allocation
+    /// The protection flags that were specified when the allocation
     /// was originally created.
-	/// 
-	/// This value does **not** change when the region's protection
-	/// is modified.
+    ///
+    /// This value does **not** change when the region's protection
+    /// is modified.
     pub allocation_protection: MemoryProtection,
 
-	/// The partition identifier for the memory region.
+    /// The partition identifier for the memory region.
     pub partition_id: u16,
 
-	/// The size of this region in bytes.
+    /// The size of this region in bytes.
     pub region_size: usize,
 
-	/// The current state of the memory region.
+    /// The current state of the memory region.
     pub state: MemoryState,
 
-	/// The current access protection of the region.
+    /// The current access protection of the region.
     pub protection: MemoryProtection,
 
-	/// The type of memory backing this region.
+    /// The type of memory backing this region.
     pub r#type: MemoryType,
 }
 
 impl MemoryRegionInfo {
-	/// Returns `true` if this region is accessible.
+    /// Returns `true` if this region is accessible.
     ///
     /// A region is considered accessible if:
     /// - It is committed ([`MemoryState::COMMIT`])
@@ -64,25 +80,17 @@ impl MemoryRegionInfo {
                 .intersects(MemoryProtection::NOACCESS | MemoryProtection::GUARD)
     }
 
-	/// Returns `true` if this region can be safely read from.
+    /// Returns `true` if this region can be safely read from.
     ///
     /// This implies:
     /// - The region is accessible
     /// - The protection flags include any readable permission
     #[inline(always)]
     pub fn is_readable(&self) -> bool {
-        self.is_accessible()
-            && self.protection.intersects(
-                MemoryProtection::READONLY
-                    | MemoryProtection::READWRITE
-                    | MemoryProtection::WRITECOPY
-                    | MemoryProtection::EXECUTE_READ
-                    | MemoryProtection::EXECUTE_READWRITE
-                    | MemoryProtection::EXECUTE_WRITECOPY,
-            )
+        self.is_accessible() && self.protection.is_readable()
     }
 
-	/// Returns `true` if this region can be written to.
+    /// Returns `true` if this region can be written to.
     ///
     /// This implies:
     /// - The region is accessible
@@ -90,16 +98,10 @@ impl MemoryRegionInfo {
     ///   copy-on-write semantics
     #[inline(always)]
     pub fn is_writable(&self) -> bool {
-        self.is_accessible()
-            && self.protection.intersects(
-                MemoryProtection::READWRITE
-                    | MemoryProtection::WRITECOPY
-                    | MemoryProtection::EXECUTE_READWRITE
-                    | MemoryProtection::EXECUTE_WRITECOPY,
-            )
+        self.is_accessible() && self.protection.is_writable()
     }
 
-	/// Returns `true` if this region contains executable code.
+    /// Returns `true` if this region contains executable code.
     ///
     /// This implies:
     /// - The region is accessible
@@ -107,16 +109,10 @@ impl MemoryRegionInfo {
     ///   read/write permissions
     #[inline(always)]
     pub fn is_executable(&self) -> bool {
-        self.is_accessible()
-            && self.protection.intersects(
-                MemoryProtection::EXECUTE
-                    | MemoryProtection::EXECUTE_READ
-                    | MemoryProtection::EXECUTE_READWRITE
-                    | MemoryProtection::EXECUTE_WRITECOPY,
-            )
+        self.is_accessible() && self.protection.is_executable()
     }
 
-	/// Returns the virtual address range covered by this memory region.
+    /// Returns the virtual address range covered by this memory region.
     #[inline(always)]
     pub fn virtual_range(&self) -> AddressRange {
         let end = self.base_address.saturating_add(self.region_size as usize);
@@ -125,17 +121,17 @@ impl MemoryRegionInfo {
 }
 
 impl From<MemoryBasicInformation> for MemoryRegionInfo {
-	#[inline(always)]
+    #[inline(always)]
     fn from(value: MemoryBasicInformation) -> Self {
         Self {
             base_address: value.base_address as _,
             allocation_base: value.allocation_base as _,
-            allocation_protection: MemoryProtection::from_bits_retain(value.allocation_protection),
+            allocation_protection: MemoryProtection::from_bits(value.allocation_protection),
             partition_id: value.partition_id,
             region_size: value.region_size,
-            state: MemoryState::from_bits_retain(value.state),
-            protection: MemoryProtection::from_bits_retain(value.protection),
-            r#type: MemoryType::from_bits_retain(value.r#type),
+            state: MemoryState::from_bits(value.state),
+            protection: MemoryProtection::from_bits(value.protection),
+            r#type: MemoryType::from_bits(value.r#type),
         }
     }
 }

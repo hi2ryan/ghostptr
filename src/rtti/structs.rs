@@ -15,7 +15,7 @@ pub struct CompleteObjectLocator {
 pub struct TypeDescriptor {
 	pub vf_table: usize,
 	pub spare: usize,
-	pub name: *const u8,
+	pub name: [u8; 0],
 }
 
 #[repr(C)]
@@ -30,7 +30,7 @@ pub struct ClassHierarchyDescriptor {
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct BaseClassArray {
-	pub base_class_descriptors: [u32; 1] // RVAs
+	pub base_class_descriptors: [u32; 0] // RVAs
 }
 
 #[repr(C)]

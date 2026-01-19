@@ -1,7 +1,7 @@
 use core::ptr;
 use ghostptr::{
     AllocationType, MemoryProtection, Process, ProcessAccess, RemoteProcess, ThreadAccess,
-    ThreadCreateFlags,
+    ThreadCreationFlags,
 };
 
 // x64 shellcode to open calc
@@ -41,7 +41,7 @@ fn main() -> ghostptr::Result<()> {
         ThreadAccess::SYNCHRONIZE,
         allocation.address as _,
         ptr::null_mut(),
-        ThreadCreateFlags::NONE,
+        ThreadCreationFlags::None,
     )?;
 
     // wait for the thread to be completed

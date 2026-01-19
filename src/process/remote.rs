@@ -1,5 +1,5 @@
 use crate::{
-    Module, ProcessError, Result, ThreadAccess, ThreadCreateFlags,
+    Module, ProcessError, Result, ThreadAccess, ThreadCreationFlags,
     iter::{
         module::{ModuleIterOrder, ModuleIterator},
         process::ProcessIterator,
@@ -7,20 +7,16 @@ use crate::{
     },
     patterns::Scanner,
     process::{
-        AllocationType, FreeType, MemoryProtection, Process,
-        ptr::AsPointer,
-        region::MemoryRegionIter,
-        thread::Thread,
-        utils::{AddressRange, MemoryAllocation, MemoryRegionInfo, ProcessHandleInfo},
+        AllocationType, FreeType, MemoryProtection, Process, ptr::AsPointer, region::MemoryRegionIter, scan::MemScanIter, thread::Thread, utils::{AddressRange, MemoryAllocation, MemoryRegionInfo, ProcessHandleInfo, get_process_handle_info}
     },
     windows::{
         Handle, NtStatus,
         flags::ProcessAccess,
         structs::{
-            ClientId, MemoryBasicInformation, ObjectAttributes, ProcessHandleSnapshotInformation,
+            ClientId, MemoryBasicInformation, ObjectAttributes,
             UnicodeString,
         },
-        utils::{query_process_basic_info, query_process_handles, unicode_to_string_remote},
+        utils::{query_process_basic_info, unicode_to_string_remote},
         wrappers::{
             nt_allocate_virtual_memory, nt_close, nt_create_thread_ex, nt_duplicate_object,
             nt_free_virtual_memory, nt_open_process, nt_protect_virtual_memory,
@@ -85,35 +81,6 @@ impl RemoteProcess {
         Self(handle)
     }
 
-    /// Queries the handles that the process has open.
-    ///
-    /// # Access Rights
-    ///
-    /// This method requires the process handle access mask to include:
-    ///
-    /// - [`ProcessAccess::QUERY_INFORMATION`]
-    ///
-    /// Without this right, the system call will fail with an
-    /// `NTSTATUS` error.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`ProcessError::NtStatus`] if querying handle information fails,
-    /// potentially due to insufficient access rights.
-    pub fn handles(&self) -> Result<Vec<ProcessHandleInfo<RemoteProcess>>> {
-        let buf = query_process_handles(self.0)?;
-        unsafe {
-            let snapshot = buf.as_ptr() as *const ProcessHandleSnapshotInformation;
-            let count = (*snapshot).handle_count as usize;
-            let entries_ptr = (*snapshot).handles.as_ptr();
-            let entries = core::slice::from_raw_parts(entries_ptr, count);
-            Ok(entries
-                .iter()
-                .map(|e| ProcessHandleInfo::from_entry(self, *e))
-                .collect())
-        }
-    }
-
     /// Duplicates the underlying process handle,
     /// returning a new `RemoteProcess` struct.
     ///
@@ -164,6 +131,14 @@ impl RemoteProcess {
     ///
     /// Returns [`ProcessError::NtStatus`] if querying basic process information fails,
     /// potentially due to insufficient access rights.
+	/// 
+	/// # Example
+    ///
+    /// ```rust
+    /// let process = RemoteProcess::open(pid, ProcessAccess::QUERY_LIMITED_INFORMATION)?;
+    /// let path = process.path()?;
+    /// println!("Path: {}", path);
+    /// ```
     pub fn path(&self) -> Result<String> {
         let peb_ptr = query_process_basic_info(self.0)?.peb_base_address;
 
@@ -192,6 +167,14 @@ impl RemoteProcess {
     ///
     /// Returns [`ProcessError::NtStatus`] if querying basic process information fails.
     /// potentially due to insufficient access rights.
+	/// 
+	/// # Example
+    ///
+    /// ```rust
+    /// let process = RemoteProcess::open(pid, ProcessAccess::QUERY_LIMITED_INFORMATION)?;
+    /// let name = process.name()?;
+    /// println!("Name: {}", name);
+    /// ```
     #[inline]
     pub fn name(&self) -> Result<String> {
         let path = self.path()?;
@@ -239,6 +222,25 @@ impl Process for RemoteProcess {
     unsafe fn handle(&self) -> Handle {
         self.0
     }
+
+	/// Queries the handles that the process has open.
+    ///
+    /// # Access Rights
+    ///
+    /// This method requires the process handle access mask to include:
+    ///
+    /// - [`ProcessAccess::QUERY_INFORMATION`]
+    ///
+    /// Without this right, the system call will fail with an
+    /// `NTSTATUS` error.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ProcessError::NtStatus`] if querying handle information fails,
+    /// potentially due to insufficient access rights.
+    fn handles(&self) -> Result<Vec<ProcessHandleInfo<Self>>> {
+		get_process_handle_info(self)
+	}
 
     /// Terminates the process.
     ///
@@ -308,7 +310,7 @@ impl Process for RemoteProcess {
         access: ThreadAccess,
         start_routine: *mut core::ffi::c_void,
         argument: *mut core::ffi::c_void,
-        flags: ThreadCreateFlags,
+        flags: ThreadCreationFlags,
     ) -> Result<Thread> {
         let mut handle: Handle = 0;
 
@@ -319,7 +321,7 @@ impl Process for RemoteProcess {
             self.0,
             start_routine,
             argument,
-            flags.bits(),
+            flags as u32,
             0,
             0,
             0,
@@ -351,15 +353,15 @@ impl Process for RemoteProcess {
     ///
     /// Returns [`crate::ProcessError::NtStatus`] if the module enumeration fails,
     /// potentially due to insufficient access rights.
-    #[inline]
+    #[inline(always)]
     fn main_module(&self) -> Result<Module<Self>> {
         self.modules(ModuleIterOrder::Load)?
             .next()
             .ok_or(ProcessError::MainModuleNotFound)
     }
 
-    /// Enumerates the modules within the process and finds
-    /// a module matching the `name` provided.
+    //// Enumerates the modules within the process and finds
+	/// a module matching the `name` provided, **case-insensitive**.
     ///
     /// # Access Rights
     ///
@@ -376,10 +378,10 @@ impl Process for RemoteProcess {
     ///
     /// Returns [`crate::ProcessError::NtStatus`] if the module enumeration fails,
     /// potentially due to insufficient access rights.
-    #[inline]
+    #[inline(always)]
     fn get_module(&self, name: &str) -> Result<Module<Self>> {
         self.modules(ModuleIterOrder::Load)?
-            .find(|m| m.name == name)
+            .find(|m| m.name.eq_ignore_ascii_case(name))
             .ok_or(ProcessError::ModuleNotFound(name.to_string()))
     }
 
@@ -400,7 +402,7 @@ impl Process for RemoteProcess {
     ///
     /// Returns [`crate::ProcessError::NtStatus`] if the module enumeration fails,
     /// potentially due to insufficient access rights.
-    #[inline]
+    #[inline(always)]
     fn modules(&self, order: ModuleIterOrder) -> Result<ModuleIterator<RemoteProcess>> {
         ModuleIterator::new(&self, order)
     }
@@ -498,6 +500,9 @@ impl Process for RemoteProcess {
             return Err(ProcessError::PartialRead(bytes_read));
         }
 
+		// SAFETY:
+		// the NtReadVirtualMemory syscall returned how many bytes we read
+		// therefore we know the length of the Vec
         unsafe {
             slice.set_len(len);
         }
@@ -752,7 +757,7 @@ impl Process for RemoteProcess {
             return Err(ProcessError::NtStatus(status));
         }
 
-        Ok(MemoryProtection::from_bits_retain(prev_protection))
+        Ok(MemoryProtection::from_bits(prev_protection))
     }
 
     /// Reserves and/or commits a region of pages within the process's
@@ -858,45 +863,12 @@ impl Process for RemoteProcess {
     ///
     /// Returns [`crate::ProcessError::NtStatus`] if reading the memory fails,
     /// potentially due to insufficient access rights.
-    fn scan_mem<S: Scanner>(
-        &self,
+    fn scan_mem<'a, S: Scanner>(
+        &'a self,
         range: AddressRange,
-        pattern: &S,
-    ) -> impl Iterator<Item = usize> {
-        let mut regions = self.mem_regions(range.clone()).into_iter();
-        let mut results = Vec::<usize>::new().into_iter();
-
-        core::iter::from_fn(move || {
-            loop {
-                if let Some(res) = results.next() {
-                    return Some(res);
-                }
-
-                let info = regions.next()?;
-                if !info.is_readable() {
-                    continue;
-                }
-
-                let region_start = info.base_address;
-                let region_end = info.base_address.saturating_add(info.region_size);
-
-                let start = range.start.max(region_start);
-                let end = range.end.min(region_end);
-                if start >= end {
-                    continue;
-                }
-
-                let read_size = end - start;
-                if let Ok(bytes) = self.read_slice::<u8>(start, read_size) {
-                    results = pattern
-                        .scan_bytes(&bytes)
-                        .into_iter()
-                        .map(|off| start + off)
-                        .collect::<Vec<usize>>()
-						.into_iter();
-                }
-            }
-        })
+        pattern: &'a S,
+    ) -> MemScanIter<'a, Self, S> {
+        MemScanIter::new(&self, range, pattern)
     }
     // fn scan_mem<S: Scanner>(&self, range: AddressRange, pattern: &S) -> Result<Vec<usize>> {
     //     Ok(self
@@ -965,7 +937,7 @@ mod tests {
 
     #[test]
     fn open_remote_process() {
-        let _process = RemoteProcess::open_first_named("Discord.exe", ProcessAccess::ALL_ACCESS)
+        let _process = RemoteProcess::open_first_named("Discord.exe", ProcessAccess::ALL)
             .expect("failed to open remote process");
     }
 
@@ -986,7 +958,7 @@ mod tests {
 
     #[test]
     fn remote_process_modules() -> Result<()> {
-        let process = RemoteProcess::open_first_named("Discord.exe", ProcessAccess::ALL_ACCESS)?;
+        let process = RemoteProcess::open_first_named("Discord.exe", ProcessAccess::ALL)?;
         let modules: Vec<Module<RemoteProcess>> =
             process.modules(ModuleIterOrder::default())?.collect();
 
@@ -1019,7 +991,7 @@ mod tests {
 
     #[test]
     fn duplicate_process_handle() {
-        let process = RemoteProcess::open_first_named("Discord.exe", ProcessAccess::ALL_ACCESS)
+        let process = RemoteProcess::open_first_named("Discord.exe", ProcessAccess::ALL)
             .expect("failed to open remote process");
 
         let duplicated = process.duplicate().expect("failed to duplicate process");
@@ -1030,7 +1002,7 @@ mod tests {
 
     #[test]
     fn query_remote_memory() -> Result<()> {
-        let process = RemoteProcess::open_first_named("Discord.exe", ProcessAccess::ALL_ACCESS)?;
+        let process = RemoteProcess::open_first_named("Discord.exe", ProcessAccess::ALL)?;
 
         let ntdll = process
             .modules(ModuleIterOrder::Load)?
@@ -1054,7 +1026,7 @@ mod tests {
 
     #[test]
     fn protect_remote_memory() -> Result<()> {
-        let process = RemoteProcess::open_first_named("Discord.exe", ProcessAccess::ALL_ACCESS)?;
+        let process = RemoteProcess::open_first_named("Discord.exe", ProcessAccess::ALL)?;
 
         // allocate new memory
         let allocation = process.alloc_mem(
@@ -1087,7 +1059,7 @@ mod tests {
 
     #[test]
     fn allocate_remote_memory() -> Result<()> {
-        let process = RemoteProcess::open_first_named("Discord.exe", ProcessAccess::ALL_ACCESS)?;
+        let process = RemoteProcess::open_first_named("Discord.exe", ProcessAccess::ALL)?;
 
         let allocation = process.alloc_mem(
             None,
@@ -1106,7 +1078,7 @@ mod tests {
 
     #[test]
     fn remote_process_name() -> Result<()> {
-        let process = RemoteProcess::open_first_named("Discord.exe", ProcessAccess::ALL_ACCESS)?;
+        let process = RemoteProcess::open_first_named("Discord.exe", ProcessAccess::ALL)?;
         let queried_name = process.name()?;
 
         assert_eq!("Discord.exe", queried_name, "mismatched name");
@@ -1115,7 +1087,7 @@ mod tests {
 
     #[test]
     fn remote_process_threads() -> Result<()> {
-        let process = RemoteProcess::open_first_named("Discord.exe", ProcessAccess::ALL_ACCESS)?;
+        let process = RemoteProcess::open_first_named("Discord.exe", ProcessAccess::ALL)?;
         let threads = process.threads()?;
 
         assert!(threads.len() > 0, "failed to get remote process threads");
@@ -1124,7 +1096,7 @@ mod tests {
 
     #[test]
     fn remote_module_exports() -> Result<()> {
-        let process = RemoteProcess::open_first_named("Discord.exe", ProcessAccess::ALL_ACCESS)?;
+        let process = RemoteProcess::open_first_named("Discord.exe", ProcessAccess::ALL)?;
 
         let ntdll = process
             .modules(ModuleIterOrder::Load)?
@@ -1152,7 +1124,7 @@ mod tests {
 
     #[test]
     fn remote_process_pattern_scan() -> Result<()> {
-        let process = RemoteProcess::open_first_named("Discord.exe", ProcessAccess::ALL_ACCESS)?;
+        let process = RemoteProcess::open_first_named("Discord.exe", ProcessAccess::ALL)?;
         let ntdll = process
             .modules(ModuleIterOrder::Load)?
             .skip(1)

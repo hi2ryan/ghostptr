@@ -1,4 +1,4 @@
-use ghostptr::{Handle, HandleObject, RemoteProcess};
+use ghostptr::{Handle, HandleObject, Process, RemoteProcess};
 
 /// Hijacks a handle in the process.
 pub fn hijack_handle(process: &RemoteProcess, r#type: &str, access: u32) -> ghostptr::Result<Option<Handle>> {

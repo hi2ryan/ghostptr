@@ -214,6 +214,16 @@ pub struct ImageExportDirectory {
     pub address_of_name_ordinals: u32,
 }
 
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct ImageImportDescriptor {
+	pub original_first_thunk: u32,
+	pub time_date_stamp: u32,
+	pub forwarder_chain: u32,
+	pub name: u32,
+	pub first_thunk: u32,
+}
+
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ThreadState {

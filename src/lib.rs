@@ -22,9 +22,9 @@ mod windows;
 pub mod error;
 pub mod iter;
 pub mod misc;
+pub mod modules;
 pub mod patterns;
 pub mod process;
-pub mod modules;
 pub mod utils;
 
 #[cfg(feature = "rtti")]
@@ -37,10 +37,10 @@ pub use rtti::*;
 pub use error::{ProcessError, Result};
 pub use iter::{ModuleIterOrder, ModuleIterator, ProcessIterator, ProcessView, ThreadView};
 pub use misc::HandleObject;
+pub use modules::*;
 pub use patterns::{Pattern16, Pattern32, Scanner};
-pub use modules::{Module, Export, Section};
 pub use process::{
-    AddressRange, CurrentProcess, MemoryRegionInfo, MemoryAllocation, Process,
+    AddressRange, CurrentProcess, MemScanIter, MemoryAllocation, MemoryRegionInfo, Process,
     ProcessHandleInfo, RemoteProcess, Thread,
 };
 pub use utils::{SafeHandle, close_handle};

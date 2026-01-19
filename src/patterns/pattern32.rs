@@ -46,6 +46,20 @@ impl Pattern32 {
         Self::from_bytes(bytes.to_vec(), mask)
     }
 
+    /// Creates a `Pattern32` from any value by interpreting its bytes.
+    ///
+    /// # Example
+    /// ```rust
+    /// let pat = Pattern32::from_value(&0xDEADBEEFu32);
+    /// let pat = Pattern32::from_value(&some_struct);
+    /// ```
+    pub fn from_value<T>(value: &T) -> Self {
+        let bytes = unsafe {
+            core::slice::from_raw_parts(value as *const T as *const u8, core::mem::size_of::<T>())
+        };
+        Self::literal(bytes)
+    }
+
     /// Creates a `Pattern32` from a code-style pattern
     ///
     /// # Example
@@ -157,7 +171,7 @@ impl Scanner for Pattern32 {
 
 #[cfg(test)]
 mod tests {
-	use super::{Pattern32, Scanner};
+    use super::{Pattern32, Scanner};
 
     #[test]
     fn simple_exact_match() {

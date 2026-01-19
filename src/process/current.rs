@@ -1,16 +1,11 @@
 use crate::{
-    Module, ProcessError, Result, ThreadAccess, ThreadCreateFlags,
-    iter::{
+    Module, ProcessError, ProcessHandleInfo, Result, ThreadAccess, ThreadCreationFlags, iter::{
         module::{ModuleIterOrder, ModuleIterator},
         process::ProcessIterator,
         thread::ThreadView,
-    },
-    process::{
-        AllocationType, AsPointer, FreeType, MemoryProtection, MemoryRegionIter, Process, Scanner,
-        thread::Thread,
-        utils::{AddressRange, MemoryAllocation, MemoryRegionInfo},
-    },
-    windows::{
+    }, process::{
+        AllocationType, AsPointer, FreeType, MemoryProtection, MemoryRegionIter, Process, Scanner, scan::MemScanIter, thread::Thread, utils::{AddressRange, MemoryAllocation, MemoryRegionInfo, get_process_handle_info}
+    }, windows::{
         Handle, NtStatus,
         constants::CURRENT_PROCESS_HANDLE,
         structs::MemoryBasicInformation,
@@ -20,7 +15,7 @@ use crate::{
             nt_protect_virtual_memory, nt_query_virtual_memory, nt_read_virtual_memory,
             nt_terminate_process, nt_write_virtual_memory,
         },
-    },
+    }
 };
 use core::{mem::MaybeUninit, ptr};
 
@@ -59,12 +54,17 @@ impl Process for CurrentProcess {
     /// Returns the pseudo handle (`-1`) of the current process.
     #[inline(always)]
     unsafe fn handle(&self) -> Handle {
-        -1isize as Handle
+        CURRENT_PROCESS_HANDLE
     }
+
+	/// Queries the handles that the process has open.
+    fn handles(&self) -> Result<Vec<ProcessHandleInfo<Self>>> {
+		get_process_handle_info(self)
+	}
 
     /// Terminates the process.
     fn terminate(&self, exit_status: NtStatus) -> Result<()> {
-        let status = nt_terminate_process(0, exit_status);
+        let status = nt_terminate_process(CURRENT_PROCESS_HANDLE, exit_status);
         if status != 0 {
             return Err(ProcessError::NtStatus(status));
         }
@@ -87,7 +87,7 @@ impl Process for CurrentProcess {
         access: ThreadAccess,
         start_routine: *mut core::ffi::c_void,
         argument: *mut core::ffi::c_void,
-        flags: ThreadCreateFlags,
+        flags: ThreadCreationFlags,
     ) -> Result<Thread> {
         let mut handle = 0;
 
@@ -98,7 +98,7 @@ impl Process for CurrentProcess {
             CURRENT_PROCESS_HANDLE,
             start_routine,
             argument,
-            flags.bits(),
+            flags as u32,
             0,
             0,
             0,
@@ -121,12 +121,12 @@ impl Process for CurrentProcess {
             .ok_or(ProcessError::MainModuleNotFound)
     }
 
-    /// Enumerates the modules within the process and finds
-    /// a module matching the `name` provided.
+    //// Enumerates the modules within the process and finds
+	/// a module matching the `name` provided, **case-insensitive**.
     #[inline]
     fn get_module(&self, name: &str) -> Result<Module<Self>> {
         self.modules(ModuleIterOrder::Load)?
-            .find(|m| m.name == name)
+            .find(|m| m.name.eq_ignore_ascii_case(name))
             .ok_or(ProcessError::ModuleNotFound(name.to_string()))
     }
 
@@ -380,7 +380,7 @@ impl Process for CurrentProcess {
             return Err(ProcessError::NtStatus(status));
         }
 
-        Ok(MemoryProtection::from_bits_retain(prev_protection))
+        Ok(MemoryProtection::from_bits(prev_protection))
     }
 
     /// Reserves and/or commits a region of pages within the process's
@@ -447,45 +447,12 @@ impl Process for CurrentProcess {
     }
 
     //// Scans virtual memory in the process according to the `range`.
-    fn scan_mem<S: Scanner>(
-        &self,
+    fn scan_mem<'a, S: Scanner>(
+        &'a self,
         range: AddressRange,
-        pattern: &S,
-    ) -> impl Iterator<Item = usize> {
-        let mut regions = self.mem_regions(range.clone()).into_iter();
-        let mut results = Vec::<usize>::new().into_iter();
-
-        core::iter::from_fn(move || {
-            loop {
-                if let Some(res) = results.next() {
-                    return Some(res);
-                }
-
-                let info = regions.next()?;
-                if !info.is_readable() {
-                    continue;
-                }
-
-                let region_start = info.base_address;
-                let region_end = info.base_address.saturating_add(info.region_size);
-
-                let start = range.start.max(region_start);
-                let end = range.end.min(region_end);
-                if start >= end {
-                    continue;
-                }
-
-                let read_size = end - start;
-                if let Ok(bytes) = self.read_slice::<u8>(start, read_size) {
-                    results = pattern
-                        .scan_bytes(&bytes)
-                        .into_iter()
-                        .map(|off| start + off)
-                        .collect::<Vec<usize>>()
-                        .into_iter();
-                }
-            }
-        })
+        pattern: &'a S,
+    ) -> MemScanIter<'a, Self, S> {
+        MemScanIter::new(&self, range, pattern)
     }
 
     /// Returns an iterator over the memory regions that intersect `range`.

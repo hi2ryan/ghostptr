@@ -46,6 +46,20 @@ impl Pattern16 {
         Self::from_bytes(bytes.to_vec(), mask)
     }
 
+	/// Creates a `Pattern16` from any value by interpreting its bytes.
+    ///
+    /// # Example
+    /// ```rust
+    /// let pat = Pattern16::from_value(&0xDEADBEEFu32);
+    /// let pat = Pattern16::from_value(&some_struct);
+    /// ```
+    pub fn from_value<T>(value: &T) -> Self {
+        let bytes = unsafe {
+            core::slice::from_raw_parts(value as *const T as *const u8, core::mem::size_of::<T>())
+        };
+        Self::literal(bytes)
+    }
+
     /// Creates a `Pattern16` from a code-style pattern
     ///
     /// # Example

@@ -7,6 +7,7 @@ pub struct MemoryRegionIter<'a, P: Process + ?Sized> {
 }
 
 impl<'a, P: Process> MemoryRegionIter<'a, P> {
+	#[inline]
     pub fn new(process: &'a P, range: AddressRange) -> Self {
         Self {
             process,

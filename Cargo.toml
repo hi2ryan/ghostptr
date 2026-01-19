@@ -1,6 +1,6 @@
 [package]
 name = "ghostptr"
-version = "0.1.6"
+version = "0.1.7"
 edition = "2024"
 
 description = "Lightweight, ergonomic library for Windows process interaction. "
@@ -23,4 +23,3 @@ members = [
 rtti = []
 
 [dependencies]
-bitflags = "2.10.0"
