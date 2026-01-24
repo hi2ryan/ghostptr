@@ -124,7 +124,7 @@ macro_rules! impl_bitflags {
 /// Represents process access rights.
 #[repr(transparent)]
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct ProcessAccess(pub u32);
+pub struct ProcessAccess(u32);
 
 impl ProcessAccess {
     pub const TERMINATE: Self = Self(0x0001);
@@ -150,7 +150,7 @@ impl_bitflags!(ProcessAccess);
 /// These values determine how interactions with the memory are allowed to proceed.
 #[repr(transparent)]
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
-pub struct MemoryProtection(pub u32);
+pub struct MemoryProtection(u32);
 
 impl MemoryProtection {
     /// Disables all access to the committed region of pages.
@@ -253,7 +253,7 @@ impl_bitflags!(MemoryProtection);
 /// These values indicate whether a region of pages is committed, reserved, or free.
 #[repr(transparent)]
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
-pub struct MemoryState(pub u32);
+pub struct MemoryState(u32);
 
 impl MemoryState {
     /// Indicates committed pages for which physical storage has been allocated.
@@ -272,7 +272,7 @@ impl_bitflags!(MemoryState);
 /// These values describe how the memory was allocated.
 #[repr(transparent)]
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
-pub struct MemoryType(pub u32);
+pub struct MemoryType(u32);
 
 impl MemoryType {
     /// Indicates that the memory pages are mapped into the view of an image section.
@@ -290,7 +290,7 @@ impl_bitflags!(MemoryType);
 /// Represents memory allocation type flags.
 #[repr(transparent)]
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
-pub struct AllocationType(pub u32);
+pub struct AllocationType(u32);
 
 impl AllocationType {
     /// Allocates memory charges (commit) from the paging file.
@@ -332,7 +332,7 @@ impl_bitflags!(AllocationType);
 /// Represents free operation type flags.
 #[repr(transparent)]
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
-pub struct FreeType(pub u32);
+pub struct FreeType(u32);
 
 impl FreeType {
     pub const DECOMMIT: Self = Self(0x00004000);
@@ -344,7 +344,7 @@ impl_bitflags!(FreeType);
 /// Represents thread access rights.
 #[repr(transparent)]
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct ThreadAccess(pub u32);
+pub struct ThreadAccess(u32);
 
 impl ThreadAccess {
     pub const TERMINATE: Self = Self(0x0001);
@@ -367,7 +367,7 @@ impl_bitflags!(ThreadAccess);
 /// Flags controlling which parts of a thread CONTEXT are read or written.
 #[repr(transparent)]
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct ThreadContextFlags(pub u32);
+pub struct ThreadContextFlags(u32);
 
 impl ThreadContextFlags {
     /// Indicates that this is an AMD64 (x86-64) ThreadContext structure.
@@ -437,7 +437,7 @@ pub enum ThreadCreationFlags {
 /// into memory by the Windows loader.
 #[repr(transparent)]
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct SectionCharacteristics(pub u32);
+pub struct SectionCharacteristics(u32);
 
 impl SectionCharacteristics {
     /// Reserved.

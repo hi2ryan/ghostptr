@@ -40,8 +40,8 @@ pub use misc::HandleObject;
 pub use modules::*;
 pub use patterns::{Pattern16, Pattern32, Scanner};
 pub use process::{
-    AddressRange, CurrentProcess, MemScanIter, MemoryAllocation, MemoryRegionInfo, Process,
-    ProcessHandleInfo, RemoteProcess, Thread,
+    AddressRange, CurrentProcess, ExecutionTimes, MemScanIter, MemoryAllocation, MemoryRegionInfo,
+    Process, ProcessHandleInfo, RemoteProcess, Thread,
 };
 pub use utils::{SafeHandle, close_handle};
 pub use windows::{Handle, NtStatus, flags::*};

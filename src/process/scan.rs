@@ -1,14 +1,16 @@
-use std::vec::IntoIter;
-
 use crate::{AddressRange, Process, Scanner, process::MemoryRegionIter};
 
 pub struct MemScanIter<'a, P: Process + ?Sized, S: Scanner> {
     process: &'a P,
     scanner: &'a S,
+
     range: AddressRange,
     regions: MemoryRegionIter<'a, P>,
+
 	curr_region_start: usize,
-    results: IntoIter<usize>,
+
+    results: Vec<usize>,
+	result_idx: usize,
 }
 
 impl<'a, P: Process, S: Scanner> MemScanIter<'a, P, S> {
@@ -18,7 +20,8 @@ impl<'a, P: Process, S: Scanner> MemScanIter<'a, P, S> {
         Self {
             process,
 
-            results: Vec::new().into_iter(),
+            results: Vec::with_capacity(0),
+			result_idx: 0,
 
             regions,
 			curr_region_start: 0,
@@ -33,17 +36,20 @@ impl<'a, P: Process, S: Scanner> Iterator for MemScanIter<'a, P, S> {
     type Item = usize;
 
     fn next(&mut self) -> Option<Self::Item> {
-        loop {
-            // check if theres a result
-            if let Some(offset) = self.results.next() {
-                return Some(self.curr_region_start + offset);
-            }
+		// drain scanner results
+		if self.result_idx < self.results.len() {
+			let offset = self.results[self.result_idx];
+			self.result_idx += 1;
+			return Some(self.curr_region_start + offset);
+		}
 
-            let info = self.regions.next()?;
+		// find first readable region
+        while let Some(info) = self.regions.next() {
             if !info.is_readable() {
                 continue;
             }
 
+			// clamp region to provided address range
             let region_start = info.base_address;
             let region_end = info.base_address.saturating_add(info.region_size);
 
@@ -61,9 +67,18 @@ impl<'a, P: Process, S: Scanner> Iterator for MemScanIter<'a, P, S> {
             };
 
             // scan bytes
-            let results = self.scanner.scan_bytes(&bytes).into_iter();
-            self.curr_region_start = region_start;
-			self.results = results;
+            self.results = self.scanner.scan_bytes(&bytes);
+			self.result_idx = 0;
+            self.curr_region_start = start;
+
+			// return first result if present
+			if !self.results.is_empty() {
+				let offset = self.results[0];
+            	self.result_idx = 1;
+				return Some(self.curr_region_start + offset);
+			}
         }
+
+		None
     }
 }

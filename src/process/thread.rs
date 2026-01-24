@@ -1,10 +1,12 @@
 use crate::{
     ProcessError, Result,
-    process::{ThreadAccess, ThreadContextFlags},
+    process::{ThreadAccess, ThreadContextFlags, utils::ExecutionTimes},
     windows::{
         Handle, NtStatus,
         constants::CURRENT_THREAD_HANDLE,
-        structs::{ClientId, ObjectAttributes, ThreadBasicInformation, ThreadContext},
+        structs::{
+            ClientId, KernelUserTimes, ObjectAttributes, ThreadBasicInformation, ThreadContext,
+        },
         wrappers::{
             nt_close, nt_duplicate_object, nt_get_context_thread, nt_open_thread,
             nt_query_information_thread, nt_resume_thread, nt_set_context_thread,
@@ -12,7 +14,7 @@ use crate::{
         },
     },
 };
-use core::time::Duration;
+use core::{mem::MaybeUninit, ptr, time::Duration};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WaitResult {
@@ -51,9 +53,9 @@ impl Thread {
     ///
     /// Returns [`ProcessError::NtStatus`]
     /// if the an invalid PID, TID, or access mask is passed.
-    pub fn open(pid: u32, tid: u32, access: ThreadAccess) -> Result<Self> {
+    pub fn open(tid: u32, access: ThreadAccess) -> Result<Self> {
         let mut client_id = ClientId {
-            unique_process: pid as usize,
+            unique_process: 0,
             unique_thread: tid as usize,
         };
 
@@ -114,9 +116,9 @@ impl Thread {
         Ok(())
     }
 
-	/// Waits for the thread to enter a signaled state (like termination).
+    /// Waits for the thread to enter a signaled state (like termination).
     ///
-	/// # Access Rights
+    /// # Access Rights
     ///
     /// This method requires the thread handle access mask to include:
     ///
@@ -124,7 +126,7 @@ impl Thread {
     ///
     /// Without this right, the system call will fail with an
     /// `NTSTATUS` error.
-	/// 
+    ///
     /// # Parameters
     ///
     /// - `timeout`:  
@@ -141,7 +143,7 @@ impl Thread {
     /// - `Ok(WaitResult::Timeout)` if the timeout elapsed.
     /// - `Err(ProcessError::NtStatus(...))` for NTSTATUS failures,
     /// possibly due to insufficient access rights.
-	///
+    ///
     pub fn wait(&self, timeout: Option<Duration>, allow_apc: bool) -> Result<WaitResult> {
         let timeout_ptr = if let Some(d) = timeout {
             let hundred_ns = d.as_nanos() as i64 / 100;
@@ -421,23 +423,54 @@ impl Thread {
         }
     }
 
-    pub(crate) fn query_info(&self) -> Result<ThreadBasicInformation> {
-        let mut return_len = 0;
-        let mut info = unsafe { core::mem::zeroed::<ThreadBasicInformation>() };
+    /// Retrieves creation and executions times for the thread.
+    ///
+    /// # Access Rights
+    ///
+    /// This method requires the thread handle access mask to include:
+    ///
+    /// - [`ThreadAccess::QUERY_INFORMATION`], **or**
+    /// - [`ThreadAccess::QUERY_LIMITED_INFORMATION`]
+    ///
+    /// Without this right, the system call will fail with an `NTSTATUS` error.
+    ///
+    /// # Returns
+    ///
+    /// Returns [`ProcessError::NtStatus`] if it fails to query the thread's
+    /// times, potentially due to insufficient access rights.
+    pub fn times(&self) -> Result<ExecutionTimes> {
+        let mut times = MaybeUninit::<KernelUserTimes>::uninit();
+        let status = nt_query_information_thread(
+            self.0,
+            0x1, // ThreadTimes
+            times.as_mut_ptr().cast(),
+            size_of::<KernelUserTimes>() as u32,
+            ptr::null_mut(),
+        );
 
+        match status {
+            0 => {
+                let raw_times = unsafe { times.assume_init() };
+                Ok(ExecutionTimes::from(raw_times))
+            }
+            _ => Err(ProcessError::NtStatus(status)),
+        }
+    }
+
+    pub(crate) fn query_info(&self) -> Result<ThreadBasicInformation> {
+        let mut info = MaybeUninit::<ThreadBasicInformation>::uninit();
         let status = nt_query_information_thread(
             self.0,
             0x0, // ThreadBasicInformation
-            (&mut info as *mut ThreadBasicInformation).cast(),
+            info.as_mut_ptr().cast(),
             size_of::<ThreadBasicInformation>() as u32,
-            &mut return_len,
+            ptr::null_mut(),
         );
 
-        if status != 0 {
-            return Err(ProcessError::NtStatus(status));
+        match status {
+            0 => Ok(unsafe { info.assume_init() }),
+            _ => Err(ProcessError::NtStatus(status)),
         }
-
-        Ok(info)
     }
 }
 

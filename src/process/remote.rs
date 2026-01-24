@@ -1,29 +1,21 @@
 use crate::{
-    Module, ProcessError, Result, ThreadAccess, ThreadCreationFlags,
-    iter::{
+    ExecutionTimes, Module, ProcessError, Result, ThreadAccess, ThreadCreationFlags, iter::{
         module::{ModuleIterOrder, ModuleIterator},
         process::ProcessIterator,
         thread::ThreadView,
-    },
-    patterns::Scanner,
-    process::{
+    }, patterns::Scanner, process::{
         AllocationType, FreeType, MemoryProtection, Process, ptr::AsPointer, region::MemoryRegionIter, scan::MemScanIter, thread::Thread, utils::{AddressRange, MemoryAllocation, MemoryRegionInfo, ProcessHandleInfo, get_process_handle_info}
-    },
-    windows::{
+    }, windows::{
         Handle, NtStatus,
         flags::ProcessAccess,
         structs::{
-            ClientId, MemoryBasicInformation, ObjectAttributes,
-            UnicodeString,
+            ClientId, KernelUserTimes, MemoryBasicInformation, ObjectAttributes, UnicodeString
         },
         utils::{query_process_basic_info, unicode_to_string_remote},
         wrappers::{
-            nt_allocate_virtual_memory, nt_close, nt_create_thread_ex, nt_duplicate_object,
-            nt_free_virtual_memory, nt_open_process, nt_protect_virtual_memory,
-            nt_query_virtual_memory, nt_read_virtual_memory, nt_terminate_process,
-            nt_write_virtual_memory,
+            nt_allocate_virtual_memory, nt_close, nt_create_thread_ex, nt_duplicate_object, nt_free_virtual_memory, nt_open_process, nt_protect_virtual_memory, nt_query_information_process, nt_query_virtual_memory, nt_read_virtual_memory, nt_terminate_process, nt_write_virtual_memory
         },
-    },
+    }
 };
 use core::{mem::MaybeUninit, ptr};
 
@@ -264,6 +256,40 @@ impl Process for RemoteProcess {
         }
         Ok(())
     }
+
+	/// Retrieves creation and executions times for the process.
+    ///
+    /// # Access Rights
+    ///
+    /// This method requires the process handle access mask to include:
+    ///
+    /// - [`ProcessAccess::QUERY_INFORMATION`], **or**
+    /// - [`ProcessAccess::QUERY_LIMITED_INFORMATION`]
+    ///
+    /// Without this right, the system call will fail with an `NTSTATUS` error.
+    ///
+    /// # Returns
+    ///
+    /// Returns [`crate::ProcessError::NtStatus`] if it fails to query the process's
+    /// times, potentially due to insufficient access rights.
+	fn times(&self) -> Result<ExecutionTimes> {
+		let mut times = MaybeUninit::<KernelUserTimes>::uninit();
+		let status = nt_query_information_process(
+			self.0,
+			0x4, // ProcessTimes
+			times.as_mut_ptr().cast(),
+			size_of::<KernelUserTimes>() as u32,
+			ptr::null_mut(),
+		);
+
+		match status {
+            0 => {
+                let raw_times = unsafe { times.assume_init() };
+                Ok(ExecutionTimes::from(raw_times))
+            }
+            _ => Err(ProcessError::NtStatus(status)),
+        }
+	}
 
     /// Lists the threads within the process.
     ///
@@ -936,13 +962,13 @@ mod tests {
     use crate::*;
 
     #[test]
-    fn open_remote_process() {
+    fn open_process() {
         let _process = RemoteProcess::open_first_named("Discord.exe", ProcessAccess::ALL)
             .expect("failed to open remote process");
     }
 
     #[test]
-    fn remote_process_pid() {
+    fn query_pid() {
         let view = ProcessIterator::new()
             .expect("failed to create process iterator")
             .find(|view| view.name == "Discord.exe")
@@ -957,7 +983,7 @@ mod tests {
     }
 
     #[test]
-    fn remote_process_modules() -> Result<()> {
+    fn iter_modules() -> Result<()> {
         let process = RemoteProcess::open_first_named("Discord.exe", ProcessAccess::ALL)?;
         let modules: Vec<Module<RemoteProcess>> =
             process.modules(ModuleIterOrder::default())?.collect();
@@ -978,7 +1004,7 @@ mod tests {
     }
 
     #[test]
-    fn remote_process_handles() -> Result<()> {
+    fn iter_handles() -> Result<()> {
         let access = ProcessAccess::QUERY_INFORMATION;
         let process = RemoteProcess::open_first_named("Discord.exe", access)?;
 
@@ -990,7 +1016,7 @@ mod tests {
     }
 
     #[test]
-    fn duplicate_process_handle() {
+    fn duplicate_handle() {
         let process = RemoteProcess::open_first_named("Discord.exe", ProcessAccess::ALL)
             .expect("failed to open remote process");
 
@@ -1001,7 +1027,7 @@ mod tests {
     }
 
     #[test]
-    fn query_remote_memory() -> Result<()> {
+    fn query_memory() -> Result<()> {
         let process = RemoteProcess::open_first_named("Discord.exe", ProcessAccess::ALL)?;
 
         let ntdll = process
@@ -1025,7 +1051,7 @@ mod tests {
     }
 
     #[test]
-    fn protect_remote_memory() -> Result<()> {
+    fn protect_memory() -> Result<()> {
         let process = RemoteProcess::open_first_named("Discord.exe", ProcessAccess::ALL)?;
 
         // allocate new memory
@@ -1058,7 +1084,7 @@ mod tests {
     }
 
     #[test]
-    fn allocate_remote_memory() -> Result<()> {
+    fn allocate_memory() -> Result<()> {
         let process = RemoteProcess::open_first_named("Discord.exe", ProcessAccess::ALL)?;
 
         let allocation = process.alloc_mem(
@@ -1077,7 +1103,7 @@ mod tests {
     }
 
     #[test]
-    fn remote_process_name() -> Result<()> {
+    fn query_name() -> Result<()> {
         let process = RemoteProcess::open_first_named("Discord.exe", ProcessAccess::ALL)?;
         let queried_name = process.name()?;
 
@@ -1086,7 +1112,7 @@ mod tests {
     }
 
     #[test]
-    fn remote_process_threads() -> Result<()> {
+    fn threads() -> Result<()> {
         let process = RemoteProcess::open_first_named("Discord.exe", ProcessAccess::ALL)?;
         let threads = process.threads()?;
 
@@ -1095,7 +1121,7 @@ mod tests {
     }
 
     #[test]
-    fn remote_module_exports() -> Result<()> {
+    fn module_exports() -> Result<()> {
         let process = RemoteProcess::open_first_named("Discord.exe", ProcessAccess::ALL)?;
 
         let ntdll = process
@@ -1123,7 +1149,7 @@ mod tests {
     }
 
     #[test]
-    fn remote_process_pattern_scan() -> Result<()> {
+    fn pattern_scan() -> Result<()> {
         let process = RemoteProcess::open_first_named("Discord.exe", ProcessAccess::ALL)?;
         let ntdll = process
             .modules(ModuleIterOrder::Load)?
@@ -1159,4 +1185,15 @@ mod tests {
 
         Ok(())
     }
+
+	#[test]
+	fn times() -> Result<()> {
+		let process = RemoteProcess::open_first_named("Discord.exe", ProcessAccess::QUERY_LIMITED_INFORMATION)?;
+		let times = process.times()?;
+
+		assert_eq!(times.exited_at, core::time::Duration::ZERO, "exited at time should be 0");
+		assert!(times.created_at > core::time::Duration::ZERO, "creation time shouldn't be 0");
+
+		Ok(())
+	}
 }

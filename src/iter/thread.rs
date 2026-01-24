@@ -35,6 +35,6 @@ pub struct ThreadView {
 impl ThreadView {
 	/// Opens the thread.
     pub fn open(&self, access: ThreadAccess) -> Result<Thread> {
-        Thread::open(self.pid, self.tid, access)
+        Thread::open(self.tid, access)
     }
 }

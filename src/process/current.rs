@@ -1,5 +1,5 @@
 use crate::{
-    Module, ProcessError, ProcessHandleInfo, Result, ThreadAccess, ThreadCreationFlags, iter::{
+    ExecutionTimes, Module, ProcessError, ProcessHandleInfo, Result, ThreadAccess, ThreadCreationFlags, iter::{
         module::{ModuleIterOrder, ModuleIterator},
         process::ProcessIterator,
         thread::ThreadView,
@@ -8,12 +8,10 @@ use crate::{
     }, windows::{
         Handle, NtStatus,
         constants::CURRENT_PROCESS_HANDLE,
-        structs::MemoryBasicInformation,
+        structs::{KernelUserTimes, MemoryBasicInformation},
         utils::{current_process_id, current_process_image_path, unicode_to_string},
         wrappers::{
-            nt_allocate_virtual_memory, nt_create_thread_ex, nt_free_virtual_memory,
-            nt_protect_virtual_memory, nt_query_virtual_memory, nt_read_virtual_memory,
-            nt_terminate_process, nt_write_virtual_memory,
+            nt_allocate_virtual_memory, nt_create_thread_ex, nt_free_virtual_memory, nt_protect_virtual_memory, nt_query_information_process, nt_query_virtual_memory, nt_read_virtual_memory, nt_terminate_process, nt_write_virtual_memory
         },
     }
 };
@@ -70,6 +68,26 @@ impl Process for CurrentProcess {
         }
         Ok(())
     }
+
+	/// Retrieves creation and executions times for the process.
+	fn times(&self) -> Result<ExecutionTimes> {
+		let mut times = MaybeUninit::<KernelUserTimes>::uninit();
+		let status = nt_query_information_process(
+			CURRENT_PROCESS_HANDLE,
+			0x4, // ProcessTimes
+			times.as_mut_ptr().cast(),
+			size_of::<KernelUserTimes>() as u32,
+			ptr::null_mut(),
+		);
+
+		match status {
+            0 => {
+                let raw_times = unsafe { times.assume_init() };
+                Ok(ExecutionTimes::from(raw_times))
+            }
+            _ => Err(ProcessError::NtStatus(status)),
+        }
+	}
 
     /// Lists the threads within the process.
     fn threads(&self) -> Result<Vec<ThreadView>> {
@@ -471,12 +489,12 @@ mod test {
     };
 
     #[test]
-    fn get_current_pid() {
+    fn get_pid() {
         assert_ne!(CurrentProcess.pid(), 0, "pid == 0");
     }
 
     #[test]
-    fn get_current_name() {
+    fn get_name() {
         assert!(
             CurrentProcess.name().starts_with("ghostptr"),
             "failed to get current process name"
@@ -559,4 +577,13 @@ mod test {
 
         Ok(())
     }
+
+	#[test]
+	fn times() -> Result<()> {
+		let times = CurrentProcess.times()?;
+		assert_eq!(times.exited_at, core::time::Duration::ZERO, "exited at time should be 0");
+		assert!(times.created_at > core::time::Duration::ZERO, "creation time shouldn't be 0");
+
+		Ok(())
+	}
 }

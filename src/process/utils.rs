@@ -5,19 +5,44 @@ use crate::{
         Handle,
         constants::{CURRENT_PROCESS_HANDLE, STATUS_INFO_LENGTH_MISMATCH},
         structs::{
-            MemoryBasicInformation, ProcessHandleEntry, ProcessHandleSnapshotInformation,
-            PublicObjectTypeInformation, UnicodeString,
+            KernelUserTimes, MemoryBasicInformation, ProcessHandleEntry, ProcessHandleSnapshotInformation, PublicObjectTypeInformation, UnicodeString
         },
         utils::{query_process_handle_info, unicode_to_string},
         wrappers::{nt_duplicate_object, nt_query_object},
     },
 };
-use core::ops::Range;
+use core::{ops::Range, time::Duration};
 
 pub type AddressRange = Range<usize>;
 
+#[derive(Debug)]
+pub struct ExecutionTimes {
+	/// The creation time of the process or thread.
+	pub created_at: Duration,
+
+	/// The exit time of the process or thread.
+	pub exited_at: Duration,
+
+	/// The amount of time the process has executed in kernel mode.
+	pub kernel_time: Duration,
+
+	/// The amount of time the process has executed in user mode.
+	pub user_time: Duration,
+}
+
+impl From<KernelUserTimes> for ExecutionTimes {
+	fn from(value: KernelUserTimes) -> Self {
+		Self {
+			created_at: Duration::from_nanos(value.create_time.max(0) as u64 * 100),
+			exited_at: Duration::from_nanos(value.exit_time.max(0) as u64 * 100),
+			kernel_time: Duration::from_nanos(value.kernel_time.max(0) as u64 * 100),
+			user_time: Duration::from_nanos(value.user_time.max(0) as u64 * 100),
+		}
+	}
+}
+
 #[inline(always)]
-pub fn get_process_handle_info<P: Process>(process: &P) -> Result<Vec<ProcessHandleInfo<P>>> {
+pub(crate) fn get_process_handle_info<P: Process>(process: &P) -> Result<Vec<ProcessHandleInfo<P>>> {
     let buf = query_process_handle_info(unsafe { process.handle() })?;
     unsafe {
         let snapshot = buf.as_ptr() as *const ProcessHandleSnapshotInformation;

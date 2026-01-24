@@ -572,3 +572,11 @@ pub struct ObjectBasicInformation {
     pub security_descriptor_size: u32,
     pub creation_time: u64,
 }
+
+#[repr(C)]
+pub struct KernelUserTimes {
+	pub create_time: i64,
+	pub exit_time: i64,
+	pub kernel_time: i64,
+	pub user_time: i64,
+}

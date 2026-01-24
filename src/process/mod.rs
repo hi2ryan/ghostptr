@@ -13,7 +13,7 @@ pub use current::CurrentProcess;
 pub use ptr::AsPointer;
 pub use remote::RemoteProcess;
 pub use thread::Thread;
-pub use utils::{AddressRange, MemoryRegionInfo, MemoryAllocation, ProcessHandleInfo};
+pub use utils::*;
 
 use crate::{modules::Module, patterns::Scanner};
 
@@ -69,6 +69,24 @@ pub trait Process {
     /// Returns [`crate::ProcessError::NtStatus`] if terminating the process fails,
     /// potentially due to insufficient access rights.
     fn terminate(&self, exit_status: NtStatus) -> Result<()>;
+
+	/// Retrieves creation and executions times for the process.
+    ///
+    /// # Access Rights
+    ///
+    /// If this is a remote process, this method
+    /// requires the process handle access mask to include:
+    ///
+    /// - [`ProcessAccess::QUERY_INFORMATION`], **or**
+    /// - [`ProcessAccess::QUERY_LIMITED_INFORMATION`]
+    ///
+    /// Without this right, the system call will fail with an `NTSTATUS` error.
+    ///
+    /// # Returns
+    ///
+    /// Returns [`crate::ProcessError::NtStatus`] if it fails to query the process's
+    /// times, potentially due to insufficient access rights.
+	fn times(&self) -> Result<ExecutionTimes>;
 
     /* THREADS */
 
