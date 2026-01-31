@@ -2,7 +2,7 @@ pub mod utils;
 pub mod variants;
 pub mod winapi;
 
-use ghostptr::{ProcessAccess, ProcessError, RemoteProcess};
+use ghostptr::{ProcessAccess, ProcessError, Process};
 use std::io::stdin;
 
 use crate::variants::variant_from_id;
@@ -61,10 +61,10 @@ fn main() {
     let process_result;
 	let access = ProcessAccess::VM_OPERATION | ProcessAccess::VM_WRITE | ProcessAccess::QUERY_INFORMATION | ProcessAccess::DUP_HANDLE;
 
-    if let Ok(pid) = process_identifier.parse::<u32>() {
-        process_result = RemoteProcess::open(pid, access);
+    if let Ok(pid) = process_identifier.trim_end().parse::<u32>() {
+        process_result = Process::open(pid, access);
     } else {
-        process_result = RemoteProcess::open_first_named(process_identifier.trim(), access);
+        process_result = Process::open_first_named(process_identifier.trim(), access);
     }
 
     // error handling

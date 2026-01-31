@@ -1,9 +1,9 @@
 /// Represents an exported symbol from a PE module's Export Address Table.
 ///
 /// Exports can be:
-/// 	- Named
-/// 	- Ordinal-only (no name)
-/// 	- Forwarded to another module
+/// - Named
+/// - Ordinal-only (no name)
+/// - Forwarded to another module
 #[derive(Debug)]
 pub struct Export {
     /// The name of the exported symbol, if present.

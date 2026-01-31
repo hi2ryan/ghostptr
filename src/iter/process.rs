@@ -1,7 +1,7 @@
 use crate::{
-    ProcessError, Result,
+    Process, ProcessError, Result,
     iter::thread::ThreadView,
-    process::{ProcessAccess, remote::RemoteProcess},
+    process::ProcessAccess,
     windows::{
         constants::STATUS_INFO_LENGTH_MISMATCH, structs::SystemProcessInformation,
         utils::unicode_to_string, wrappers::nt_query_system_information,
@@ -11,17 +11,17 @@ use crate::{
 /// Represents information regarding a system process
 /// that has not been opened to a handle.
 pub struct ProcessView {
-	/// The process's unique identifier.
+    /// The process's unique identifier.
     pub pid: u32,
 
-	/// The identifier of the process that created this process.
-	/// Not updated and incorrectly refers to processes with recycled identifiers.
-	pub parent_pid: u32,
+    /// The identifier of the process that created this process.
+    /// Not updated and incorrectly refers to processes with recycled identifiers.
+    pub parent_pid: u32,
 
-	/// The file name of the executable image.
+    /// The file name of the executable image.
     pub name: String,
 
-	/// Threads running in the process.
+    /// Threads running in the process.
     pub threads: Vec<ThreadView>,
 }
 
@@ -38,8 +38,9 @@ impl core::fmt::Debug for ProcessView {
 }
 
 impl ProcessView {
-    pub fn open(&self, access: ProcessAccess) -> Result<RemoteProcess> {
-        RemoteProcess::open(self.pid, access)
+    #[inline(always)]
+    pub fn open(&self, access: ProcessAccess) -> Result<Process> {
+        Process::open(self.pid, access)
     }
 }
 
@@ -87,9 +88,7 @@ impl ProcessIterator {
 
     pub fn find_first_named(name: &str) -> Result<ProcessView> {
         Self::new()?
-            .find(|proc| {
-				proc.name == name
-			})
+            .find(|proc| proc.name == name)
             .ok_or(ProcessError::ProcessNotFound(name.to_string()))
     }
 }
@@ -107,7 +106,7 @@ impl Iterator for ProcessIterator {
             let spi = &*(base.add(self.offset) as *const SystemProcessInformation);
 
             let pid = spi.unique_process_id as u32;
-			let parent_pid = spi.inherited_from_unique_process_id as u32;
+            let parent_pid = spi.inherited_from_unique_process_id as u32;
             let name = unicode_to_string(&spi.image_name);
             let thread_count = spi.number_of_threads;
 
@@ -119,9 +118,9 @@ impl Iterator for ProcessIterator {
             }
 
             let threads = core::slice::from_raw_parts(spi.threads.as_ptr(), thread_count as usize);
-            
-			// convert SystemThreadInformation to ThreadView's
-			let threads = threads
+
+            // convert SystemThreadInformation to ThreadView's
+            let threads = threads
                 .iter()
                 .map(|&info| ThreadView {
                     start_address: info.start_address as usize,
@@ -135,7 +134,12 @@ impl Iterator for ProcessIterator {
                 })
                 .collect();
 
-            Some(ProcessView { pid, parent_pid, name, threads })
+            Some(ProcessView {
+                pid,
+                parent_pid,
+                name,
+                threads,
+            })
         }
     }
 }
@@ -146,8 +150,11 @@ mod tests {
 
     #[test]
     fn iter_processes() {
-        for p in ProcessIterator::new().expect("failed to create process iterator") {
-            println!("{:?}", p);
-        }
+        assert!(
+            ProcessIterator::new()
+                .expect("failed to create process iterator")
+                .any(|process| process.name == "System"),
+            "system process not found"
+        );
     }
 }

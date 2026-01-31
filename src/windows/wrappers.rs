@@ -216,7 +216,7 @@ pub fn nt_protect_virtual_memory(
         );
     };
 
-    return status;
+    status
 }
 
 /// NtAllocateVirtualMemory
@@ -257,7 +257,7 @@ pub fn nt_allocate_virtual_memory(
         );
     };
 
-    return status;
+    status
 }
 
 /// NtFreeVirtualMemory
@@ -288,7 +288,7 @@ pub fn nt_free_virtual_memory(
         )
     };
 
-    return status;
+    status
 }
 
 /// NtOpenThread
@@ -323,6 +323,7 @@ pub fn nt_open_thread(
 }
 
 /// NtCreateThreadEx
+#[allow(clippy::too_many_arguments)]
 #[inline(always)]
 pub fn nt_create_thread_ex(
     thread_handle: *mut Handle,

@@ -5,9 +5,9 @@ use crate::{
         Handle,
         constants::{CURRENT_PROCESS_HANDLE, STATUS_INFO_LENGTH_MISMATCH},
         structs::{
-            KernelUserTimes, MemoryBasicInformation, ProcessHandleEntry, ProcessHandleSnapshotInformation, PublicObjectTypeInformation, UnicodeString
+            KernelUserTimes, MemoryBasicInformation, ProcessHandleEntry, PublicObjectTypeInformation, UnicodeString
         },
-        utils::{query_process_handle_info, unicode_to_string},
+        utils::unicode_to_string,
         wrappers::{nt_duplicate_object, nt_query_object},
     },
 };
@@ -39,21 +39,6 @@ impl From<KernelUserTimes> for ExecutionTimes {
 			user_time: Duration::from_nanos(value.user_time.max(0) as u64 * 100),
 		}
 	}
-}
-
-#[inline(always)]
-pub(crate) fn get_process_handle_info<P: Process>(process: &P) -> Result<Vec<ProcessHandleInfo<P>>> {
-    let buf = query_process_handle_info(unsafe { process.handle() })?;
-    unsafe {
-        let snapshot = buf.as_ptr() as *const ProcessHandleSnapshotInformation;
-        let count = (*snapshot).handle_count as usize;
-        let entries_ptr = (*snapshot).handles.as_ptr();
-        let entries = core::slice::from_raw_parts(entries_ptr, count);
-        Ok(entries
-            .iter()
-            .map(|e| ProcessHandleInfo::from_entry(process, *e))
-            .collect())
-    }
 }
 
 /// Represents queried information regarding region of virtual memory.
@@ -140,7 +125,7 @@ impl MemoryRegionInfo {
     /// Returns the virtual address range covered by this memory region.
     #[inline(always)]
     pub fn virtual_range(&self) -> AddressRange {
-        let end = self.base_address.saturating_add(self.region_size as usize);
+        let end = self.base_address.saturating_add(self.region_size);
         self.base_address..end
     }
 }
@@ -163,8 +148,8 @@ impl From<MemoryBasicInformation> for MemoryRegionInfo {
 
 /// Represents a handle that a process has opened.
 #[derive(Debug, Clone)]
-pub struct ProcessHandleInfo<'a, P: Process + ?Sized> {
-    pub(crate) process: &'a P,
+pub struct ProcessHandleInfo<'process> {
+    pub(crate) process: &'process Process,
 
     /// The value of the handle.
     pub handle: Handle,
@@ -185,7 +170,7 @@ pub struct ProcessHandleInfo<'a, P: Process + ?Sized> {
     pub attributes: u32,
 }
 
-impl<'a, P: Process> ProcessHandleInfo<'a, P> {
+impl<'process> ProcessHandleInfo<'process> {
     /// Duplicates the handle.
     ///
     /// # Access Rights
@@ -287,9 +272,9 @@ impl<'a, P: Process> ProcessHandleInfo<'a, P> {
 
     #[inline(always)]
     pub(crate) fn from_entry(
-        process: &'a P,
+        process: &'process Process,
         entry: ProcessHandleEntry,
-    ) -> ProcessHandleInfo<'a, P> {
+    ) -> ProcessHandleInfo<'process> {
         Self {
             process,
             handle: entry.handle,
@@ -302,17 +287,17 @@ impl<'a, P: Process> ProcessHandleInfo<'a, P> {
     }
 }
 
-impl<'a, P: Process> Into<HandleObject> for ProcessHandleInfo<'a, P> {
+impl<'process> From<ProcessHandleInfo<'process>> for HandleObject {
     #[inline(always)]
-    fn into(self) -> HandleObject {
-        HandleObject::from_handle(self.handle)
+    fn from(val: ProcessHandleInfo<'process>) -> Self {
+        HandleObject::from_handle(val.handle)
     }
 }
 
 /// Represents an allocated region in a process' memory.
 #[derive(Debug, Clone)]
-pub struct MemoryAllocation<'a, P: Process + ?Sized> {
-    pub(crate) process: &'a P,
+pub struct MemoryAllocation<'process> {
+    pub(crate) process: &'process Process,
 
     pub address: usize,
     pub size: usize,
@@ -320,7 +305,7 @@ pub struct MemoryAllocation<'a, P: Process + ?Sized> {
     pub region_size: usize,
 }
 
-impl<'a, P: Process> MemoryAllocation<'a, P> {
+impl<'process> MemoryAllocation<'process> {
     #[inline(always)]
     pub fn free(&self, r#type: FreeType) -> Result<()> {
         self.process.free_mem(self.address, self.size, r#type)

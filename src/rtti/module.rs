@@ -4,17 +4,22 @@ use crate::{
     error::{ProcessError, Result},
     modules::Module,
     patterns::Pattern32,
-    process::{AsPointer, Process},
+    process::AsPointer,
 };
 use core::mem::{offset_of, size_of};
 
 const SIZE_PTR: usize = size_of::<usize>();
 
 /// Extension trait for `Module` that enables RTTI methods.
-pub trait ModuleRTTIExt<P: Process> {
+pub trait ModuleRTTIExt<'process> {
     /// Returns a lazy iterator over all objects of a specific
     /// **mangled** type within this module.
-    fn objects_with_type<'a>(&'a self, mangled_name: &'a str) -> Result<RTTIObjectIter<'a, P>>;
+    fn objects_with_type<'module>(
+        &'module self,
+        mangled_name: &str,
+    ) -> Result<RTTIObjectIter<'process, 'module, 'module>>
+    where
+        'module: 'process;
 
     /// Gets all unique RTTI type names found in this module.
     ///
@@ -31,30 +36,36 @@ pub trait ModuleRTTIExt<P: Process> {
     fn get_all_types(&self) -> Result<Vec<String>>;
 
     /// Returns the RTTI **mangled** type name for an object at the given address.
-	/// 
-	/// # Example
+    ///
+    /// # Example
     /// ```rust
     /// let address = module.base_address + 0x123456;
-	/// if Some(name) = module.type_name_at(address)? {
-	/// 	println!("Object at {:X} has RTTI type: {}", address, demangle(&name));
-	/// }
+    /// if Some(name) = module.type_name_at(address)? {
+    ///     println!("Object at {:X} has RTTI type: {}", address, demangle(&name));
+    /// }
     /// ```
     fn type_name_at(&self, address: impl AsPointer) -> Result<Option<String>>;
 
     /// Checks whether the object at `address` matches the given RTTI type.
-	/// 
-	/// # Example
+    ///
+    /// # Example
     /// ```rust
     /// let address = module.base_address + 0x123456;
-	/// if module.has_type_at(address)? {
-	/// 	println!("Object at {:X} has RTTI type info", address);
-	/// }
+    /// if module.has_type_at(address)? {
+    ///     println!("Object at {:X} has RTTI type info", address);
+    /// }
     /// ```
     fn has_type_at(&self, address: impl AsPointer) -> Result<bool>;
 }
 
-impl<'m, P: Process> ModuleRTTIExt<P> for Module<'m, P> {
-    fn objects_with_type<'a>(&'a self, mangled_name: &'a str) -> Result<RTTIObjectIter<'a, P>> {
+impl<'process> ModuleRTTIExt<'process> for Module<'process> {
+    fn objects_with_type<'module>(
+        &'module self,
+        mangled_name: &str,
+    ) -> Result<RTTIObjectIter<'process, 'module, 'module>>
+    where
+        'module: 'process,
+    {
         // get .data & .rdata sections
         let data = self.get_section(".data")?;
         let rdata = self.get_section(".rdata")?;
@@ -216,20 +227,20 @@ impl<'m, P: Process> ModuleRTTIExt<P> for Module<'m, P> {
 
 /// Represents an iterator scanning for all
 /// objecs of a specific mangled type within a module.
-pub struct RTTIObjectIter<'a, P: Process + ?Sized> {
-    module: &'a Module<'a, P>,
-    rdata_section: Section<'a, P>,
+pub struct RTTIObjectIter<'process, 'module, 'scanner> {
+    module: &'module Module<'process>,
+    rdata_section: Section<'process, 'module>,
     td_rva_pattern: Pattern32,
-    xrefs: Option<MemScanIter<'a, P, Pattern32>>,
+    xrefs: Option<MemScanIter<'process, 'scanner, Pattern32>>,
     mangled_name: String,
 }
 
-impl<'a, P: Process> RTTIObjectIter<'a, P> {
+impl<'process, 'module, 'scanner> RTTIObjectIter<'process, 'module, 'scanner> {
     #[inline(always)]
     pub(crate) fn new(
-        module: &'a Module<'a, P>,
+        module: &'module Module<'process>,
         mangled_name: String,
-        rdata_section: Section<'a, P>,
+        rdata_section: Section<'process, 'module>,
         td_rva_pattern: Pattern32,
     ) -> Self {
         Self {
@@ -242,19 +253,20 @@ impl<'a, P: Process> RTTIObjectIter<'a, P> {
     }
 }
 
-impl<'a, P: Process> Iterator for RTTIObjectIter<'a, P> {
+impl<'process, 'module, 'scanner> Iterator for RTTIObjectIter<'process, 'module, 'scanner>
+{
     type Item = RTTIObject;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.xrefs.is_none() {
             unsafe {
-                let pattern_ref: &'a Pattern32 = &*(&self.td_rva_pattern as *const Pattern32);
+                let pattern_ref: &'scanner Pattern32 = &*(&self.td_rva_pattern as *const Pattern32);
                 self.xrefs = Some(self.rdata_section.scan_mem(pattern_ref));
             }
         }
 
         let xrefs = self.xrefs.as_mut().unwrap();
-        while let Some(xref) = xrefs.next() {
+        for xref in xrefs.by_ref() {
             // backtrack to the CompleteObjectLocator
             // since we have the COL->type_descriptor_rva
             let col_ptr = xref - offset_of!(CompleteObjectLocator, type_descriptor_rva);
@@ -319,7 +331,7 @@ mod tests {
         let module = process.main_module()?;
 
         let types = module.get_all_types()?;
-        assert!(types.len() > 0, "no rtti types found");
+        assert!(!types.is_empty(), "no rtti types found");
 
         Ok(())
     }
