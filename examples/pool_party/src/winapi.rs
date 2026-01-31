@@ -1,17 +1,17 @@
-use ghostptr::{Handle, NtStatus};
 use core::ffi::c_void;
+use ghostptr::{Handle, NtStatus};
 
 pub const WORKER_FACTORY_ALL_ACCESS: u32 =
-    0 | 0xF0000 | 0x00001 | 0x00002 | 0x00004 | 0x00008 | 0x00010 | 0x00020;
+    0xF0000 | 0x00001 | 0x00002 | 0x00004 | 0x00008 | 0x00010 | 0x00020;
 
 unsafe extern "system" {
-	pub fn NtSetIoCompletion(
-		io_completion_handle: Handle,
-		key_context: *const c_void,
-		apc_context: *const c_void,
-		io_status: NtStatus,
-		io_status_info: usize,
-	) -> NtStatus;
+    pub fn NtSetIoCompletion(
+        io_completion_handle: Handle,
+        key_context: *const c_void,
+        apc_context: *const c_void,
+        io_status: NtStatus,
+        io_status_info: usize,
+    ) -> NtStatus;
 
     pub fn NtQueryInformationWorkerFactory(
         handle: Handle,
@@ -60,39 +60,38 @@ pub struct WorkerFactoryBasicInformation {
 
 #[repr(C)]
 pub struct ListEntry {
-	pub next: *const ListEntry,
-	pub prev: *const ListEntry,
+    pub next: *const ListEntry,
+    pub prev: *const ListEntry,
 }
 
 #[repr(C)]
 pub struct TpTaskCallbacks {
-	pub execute_callback: *const c_void,
-	pub unposted: *const c_void,
+    pub execute_callback: *const c_void,
+    pub unposted: *const c_void,
 }
 
 #[repr(C)]
 pub struct TpTask {
-	pub callbacks: *const TpTaskCallbacks,
-	pub numa_node: u32,
-	pub ideal_processor: u8,
-	padding: [u8; 3],
-	pub list_entry: ListEntry,
+    pub callbacks: *const TpTaskCallbacks,
+    pub numa_node: u32,
+    pub ideal_processor: u8,
+    padding: [u8; 3],
+    pub list_entry: ListEntry,
 }
 
 #[repr(C)]
 pub struct TpDirect {
-	pub task: TpTask,
-	pub lock: u64,
-	pub io_completion_information_list: ListEntry,
-	pub callback: *const c_void,
-	pub numa_node: u32,
-	pub ideal_processor: u8,
-	pub padding: [u8; 3]
+    pub task: TpTask,
+    pub lock: u64,
+    pub io_completion_information_list: ListEntry,
+    pub callback: *const c_void,
+    pub numa_node: u32,
+    pub ideal_processor: u8,
+    pub padding: [u8; 3],
 }
 
 // #define IO_COMPLETION_ALL_ACCESS (IO_COMPLETION_QUERY_STATE|IO_COMPLETION_MODIFY_STATE|STANDARD_RIGHTS_REQUIRED|SYNCHRONIZE)
-pub const IO_COMPLETION_ALL_ACCESS: u32 = 0
-	| 0x000001 // IO_COMPLETION_QUERY_STATE
+pub const IO_COMPLETION_ALL_ACCESS: u32 = 0x000001 // IO_COMPLETION_QUERY_STATE
 	| 0x000002 // IO_COMPLETION_MODIFY_STATE
 	| 0x0F0000 // STANDARD_RIGHTS_REQUIRED
 	| 0x100000; // SYNCHRONIZE

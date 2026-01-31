@@ -1,6 +1,6 @@
 use core::ptr;
 use ghostptr::{
-    AllocationType, MemoryProtection, Process, ProcessAccess, RemoteProcess, ThreadAccess,
+    AllocationType, MemoryProtection, Process, ProcessAccess, ThreadAccess,
     ThreadCreationFlags,
 };
 
@@ -17,7 +17,7 @@ const SHELLCODE: [u8; 105] = [
 
 fn main() -> ghostptr::Result<()> {
     // open process
-    let process = RemoteProcess::open_first_named(
+    let process = Process::open_first_named(
         "Notepad.exe",
         ProcessAccess::VM_OPERATION
             | ProcessAccess::VM_READ

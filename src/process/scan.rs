@@ -1,11 +1,11 @@
 use crate::{AddressRange, Process, Scanner, process::MemoryRegionIter};
 
-pub struct MemScanIter<'a, P: Process + ?Sized, S: Scanner> {
-    process: &'a P,
-    scanner: &'a S,
+pub struct MemScanIter<'process, 'scanner, S: Scanner> {
+    process: &'process Process,
+    scanner: &'scanner S,
 
     range: AddressRange,
-    regions: MemoryRegionIter<'a, P>,
+    regions: MemoryRegionIter<'process>,
 
 	curr_region_start: usize,
 
@@ -13,14 +13,14 @@ pub struct MemScanIter<'a, P: Process + ?Sized, S: Scanner> {
 	result_idx: usize,
 }
 
-impl<'a, P: Process, S: Scanner> MemScanIter<'a, P, S> {
-    pub fn new(process: &'a P, range: AddressRange, scanner: &'a S) -> Self {
+impl<'process, 'scanner, S: Scanner> MemScanIter<'process, 'scanner, S> {
+    pub fn new(process: &'process Process, range: AddressRange, scanner: &'scanner S) -> Self {
         let regions = process.mem_regions(range.clone());
 
         Self {
             process,
 
-            results: Vec::with_capacity(0),
+            results: Vec::new(),
 			result_idx: 0,
 
             regions,
@@ -32,7 +32,7 @@ impl<'a, P: Process, S: Scanner> MemScanIter<'a, P, S> {
     }
 }
 
-impl<'a, P: Process, S: Scanner> Iterator for MemScanIter<'a, P, S> {
+impl<'process, 'scanner, S: Scanner> Iterator for MemScanIter<'process, 'scanner, S> {
     type Item = usize;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -44,7 +44,7 @@ impl<'a, P: Process, S: Scanner> Iterator for MemScanIter<'a, P, S> {
 		}
 
 		// find first readable region
-        while let Some(info) = self.regions.next() {
+        for info in self.regions.by_ref() {
             if !info.is_readable() {
                 continue;
             }

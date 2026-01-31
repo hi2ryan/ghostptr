@@ -24,38 +24,6 @@ pub fn get_peb() -> *const ProcessEnvBlock {
     }
 }
 
-#[inline(always)]
-pub fn current_process_id() -> u32 {
-    let pid: usize;
-
-    unsafe {
-        asm!(
-            "mov {0}, gs:[0x30]", // TEB
-            "mov {0}, [{0} + 0x40]", // TEB->ClientId->UniqueProcess
-            out(reg) pid,
-            options(nostack, preserves_flags)
-        );
-    }
-
-    pid as u32
-}
-
-pub fn current_process_image_path() -> UnicodeString {
-    let image_path_ptr: *const UnicodeString;
-
-    unsafe {
-        asm!(
-            "mov {0}, gs:[0x60]", // PEB
-            "mov {0}, [{0} + 0x20]", // PEB->ProcessParameters
-            "lea {0}, [{0} + 0x60]", // RTL_USER_PROCESS_PARAMETERS->ImagePathName
-            out(reg) image_path_ptr,
-            options(nostack, preserves_flags)
-        );
-
-        *image_path_ptr
-    }
-}
-
 pub fn unicode_to_string(u: &UnicodeString) -> String {
     if u.buffer.is_null() || u.length == 0 {
         return String::new();
@@ -97,7 +65,7 @@ pub fn get_module_base(name: &str) -> Option<*const u8> {
         let ldr = (*peb).ldr;
 
         let head = &(*ldr).in_memory_order_module_list;
-        let mut current = (*head).next;
+        let mut current = head.next;
 
         while current != head {
             let entry = (current as usize
@@ -144,7 +112,7 @@ pub fn get_export(base: *const u8, name: &str) -> Option<*const u8> {
         let name_bytes = name.as_bytes();
         for i in 0..number_of_names {
             let name_rva = *address_of_names.add(i as usize);
-            let name_ptr = base.add(name_rva as usize) as *const u8;
+            let name_ptr = base.add(name_rva as usize);
 
 			let export_name = core::ffi::CStr::from_ptr(name_ptr.cast());
 			// if name=="NtOpenProcess" {

@@ -1,14 +1,13 @@
 use super::Module;
 use crate::{
-    AddressRange, MemScanIter, Scanner,
-    process::{MemoryRegionIter, Process},
+    AddressRange, MemScanIter, Scanner, process::MemoryRegionIter,
     windows::flags::SectionCharacteristics,
 };
 
 /// Represents an image section header from a PE module
 #[derive(Clone, Debug)]
-pub struct Section<'a, P: Process + ?Sized> {
-    pub(crate) module: &'a Module<'a, P>,
+pub struct Section<'process, 'module> {
+    pub(crate) module: &'module Module<'process>,
 
     /// The name of the section as defined in the PE header.
     ///
@@ -28,7 +27,7 @@ pub struct Section<'a, P: Process + ?Sized> {
     pub characteristics: SectionCharacteristics,
 }
 
-impl<'a, P: Process> Section<'a, P> {
+impl<'process, 'module> Section<'process, 'module> {
     /// Returns the virtual address range covered by this module section.
     #[inline(always)]
     pub fn virtual_range(&self) -> AddressRange {
@@ -36,22 +35,24 @@ impl<'a, P: Process> Section<'a, P> {
         self.address..end
     }
 
-	/// Checks whether an address lies within the virtual address range of this section.
-	#[inline(always)]
-	pub fn contains(&self, address: &usize) -> bool {
-		self.virtual_range().contains(address)
-	}
+    /// Checks whether an address lies within the virtual address range of this section.
+    #[inline(always)]
+    pub fn contains(&self, address: &usize) -> bool {
+        self.virtual_range().contains(address)
+    }
 
     /// Scans virtual memory in the process according to the
     /// virtual address range covered by this module.
-    #[inline(always)]
-    pub fn scan_mem<S: Scanner>(&self, pattern: &'a S) -> MemScanIter<'a, P, S> {
+    pub fn scan_mem<'scanner, S>(&self, pattern: &'scanner S) -> MemScanIter<'process, 'scanner, S>
+    where
+        S: Scanner + 'scanner,
+    {
         self.module.process.scan_mem(self.virtual_range(), pattern)
     }
 
     /// Returns an iterator over the memory regions that intersect this section.
     #[inline(always)]
-    pub fn mem_regions(&self) -> MemoryRegionIter<P> {
+    pub fn mem_regions(&self) -> MemoryRegionIter<'process> {
         MemoryRegionIter::new(self.module.process, self.virtual_range())
     }
 }

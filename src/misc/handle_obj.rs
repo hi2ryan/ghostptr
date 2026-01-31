@@ -25,16 +25,19 @@ pub struct HandleObject(Handle);
 
 impl HandleObject {
 	/// Retrieves the underlying raw `Handle`.
+	/// #[inline(always)]
     pub fn handle(&self) -> Handle {
         self.0
     }
 
 	/// Creates `HandleObject` from the raw `handle`.
+	#[inline(always)]
     pub fn from_handle(handle: Handle) -> Self {
         Self(handle)
     }
 
 	/// Closes the handle.
+	#[inline(always)]
     pub fn close(&self) -> Result<()> {
         close_handle(self.0)
     }
@@ -61,7 +64,7 @@ impl HandleObject {
     /// Returns [`crate::ProcessError::NtStatus`] if duplicating the handle fails,
     /// potentially due to insufficient access rights.
     ///
-    pub fn duplicate<P: Process>(&self, src_process: &P, access: Option<u32>) -> Result<Handle> {
+    pub fn duplicate(&self, src_process: &Process, access: Option<u32>) -> Result<Handle> {
         let mut new_handle = 0;
         let source_handle = unsafe { src_process.handle() };
 
@@ -171,19 +174,22 @@ impl HandleObject {
     }
 }
 
-impl Into<Handle> for HandleObject {
-    fn into(self) -> Handle {
-        self.0
+impl From<HandleObject> for Handle {
+	#[inline(always)]
+    fn from(val: HandleObject) -> Self {
+        val.0
     }
 }
 
 impl From<Handle> for HandleObject {
+	#[inline(always)]
     fn from(value: Handle) -> Self {
         Self(value)
     }
 }
 
 impl From<ProcessHandleEntry> for HandleObject {
+	#[inline(always)]
     fn from(value: ProcessHandleEntry) -> Self {
         Self(value.handle)
     }

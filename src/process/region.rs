@@ -1,14 +1,14 @@
 use crate::{AddressRange, MemoryRegionInfo, Process};
 
-pub struct MemoryRegionIter<'a, P: Process + ?Sized> {
-    process: &'a P,
+pub struct MemoryRegionIter<'process> {
+    process: &'process Process,
     current_addr: usize,
     end_addr: usize,
 }
 
-impl<'a, P: Process> MemoryRegionIter<'a, P> {
+impl<'process> MemoryRegionIter<'process> {
 	#[inline]
-    pub fn new(process: &'a P, range: AddressRange) -> Self {
+    pub fn new(process: &'process Process, range: AddressRange) -> Self {
         Self {
             process,
             current_addr: range.start,
@@ -17,7 +17,7 @@ impl<'a, P: Process> MemoryRegionIter<'a, P> {
     }
 }
 
-impl<'a, P: Process> Iterator for MemoryRegionIter<'a, P> {
+impl<'process> Iterator for MemoryRegionIter<'process> {
     type Item = MemoryRegionInfo;
 
     fn next(&mut self) -> Option<Self::Item> {

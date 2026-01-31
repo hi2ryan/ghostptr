@@ -11,7 +11,7 @@ static SYSCALLS: LazyLock<Syscalls> = LazyLock::new(Syscalls::resolve);
 
 #[inline(always)]
 pub fn syscalls() -> &'static Syscalls {
-    &*SYSCALLS
+    &SYSCALLS
 }
 
 macro_rules! syscalls {
@@ -61,7 +61,7 @@ syscalls! {
 }
 
 fn get_syscall_id(name: &str) -> Option<u32> {
-    get_export(*NTDLL_BASE as _, name).map(|address| extract_syscall_id(address))?
+    get_export(*NTDLL_BASE as _, name).map(extract_syscall_id)?
 }
 
 #[inline(always)]

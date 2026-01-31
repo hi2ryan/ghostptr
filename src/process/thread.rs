@@ -43,6 +43,10 @@ impl Thread {
         Self(handle)
     }
 
+	/// Returns the underlying process handle.
+    ///
+    /// # Safety
+    /// The handle will be closed as the [`Thread`] is dropped.
     pub unsafe fn handle(&self) -> Handle {
         self.0
     }
@@ -142,7 +146,7 @@ impl Thread {
     /// - `Ok(WaitResult::Signaled)` if the thread terminated.
     /// - `Ok(WaitResult::Timeout)` if the timeout elapsed.
     /// - `Err(ProcessError::NtStatus(...))` for NTSTATUS failures,
-    /// possibly due to insufficient access rights.
+    ///   possibly due to insufficient access rights.
     ///
     pub fn wait(&self, timeout: Option<Duration>, allow_apc: bool) -> Result<WaitResult> {
         let timeout_ptr = if let Some(d) = timeout {
@@ -484,7 +488,7 @@ impl Drop for Thread {
 #[cfg(test)]
 mod tests {
     use crate::{
-        Process, ProcessAccess, RemoteProcess, Result, ThreadContextFlags,
+        Process, ProcessAccess, Result, ThreadContextFlags,
         iter::process::ProcessIterator, process::ThreadAccess,
     };
 
@@ -512,7 +516,7 @@ mod tests {
 
     #[test]
     fn suspend_resume_thread() -> Result<()> {
-        let process = RemoteProcess::open_first_named(
+        let process = Process::open_first_named(
             "Discord.exe",
             ProcessAccess::QUERY_LIMITED_INFORMATION,
         )?;
@@ -532,7 +536,7 @@ mod tests {
 
     #[test]
     fn thread_context() -> Result<()> {
-        let process = RemoteProcess::open_first_named(
+        let process = Process::open_first_named(
             "Discord.exe",
             ProcessAccess::QUERY_LIMITED_INFORMATION,
         )?;

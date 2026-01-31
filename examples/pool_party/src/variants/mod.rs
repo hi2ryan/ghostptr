@@ -1,7 +1,7 @@
 mod tp_worker_factory;
 mod tp_direct_insertion;
 
-use ghostptr::RemoteProcess;
+use ghostptr::Process;
 
 use tp_direct_insertion::TpDirectInsertion;
 use tp_worker_factory::TpWorkerFactory;
@@ -15,5 +15,5 @@ pub fn variant_from_id(id: u8) -> Option<Box<dyn Variant>> {
 }
 
 pub trait Variant {
-    fn run(&self, process: &RemoteProcess, shellcode: &[u8]) -> ghostptr::Result<()>;
+    fn run(&self, process: &Process, shellcode: &[u8]) -> ghostptr::Result<()>;
 }

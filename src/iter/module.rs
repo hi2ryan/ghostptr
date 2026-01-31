@@ -18,15 +18,15 @@ pub enum ModuleIterOrder {
 
 /// Iterates the modules of a process by
 /// walking its PEB LDR doubly linked list
-pub struct ModuleIterator<'a, P: Process + ?Sized> {
-    process: &'a P,
+pub struct ModuleIterator<'process> {
+    process: &'process Process,
     order: ModuleIterOrder,
     head: *const ListEntry,
     next: *const ListEntry,
 }
 
-impl<'a, P: Process> ModuleIterator<'a, P> {
-    pub fn new(process: &'a P, order: ModuleIterOrder) -> Result<Self> {
+impl<'process> ModuleIterator<'process> {
+    pub fn new(process: &'process Process, order: ModuleIterOrder) -> Result<Self> {
         let handle = unsafe { process.handle() };
 
         // get PEB address
@@ -58,8 +58,8 @@ impl<'a, P: Process> ModuleIterator<'a, P> {
     }
 }
 
-impl<'a, P: Process> Iterator for ModuleIterator<'a, P> {
-    type Item = Module<'a, P>;
+impl<'process> Iterator for ModuleIterator<'process> {
+    type Item = Module<'process>;
 
     fn next(&mut self) -> Option<Self::Item> {
         let current = self.next;
