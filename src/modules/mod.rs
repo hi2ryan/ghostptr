@@ -42,6 +42,9 @@ pub struct Module<'process> {
     pub flags: u32,
 }
 
+unsafe impl<'process> Send for Module<'process> {}
+unsafe impl<'process> Sync for Module<'process> {}
+
 impl<'process> Module<'process> {
 	/// Returns the virtual address range covered by this module.
 	#[inline(always)]
