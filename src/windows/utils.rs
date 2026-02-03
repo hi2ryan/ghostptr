@@ -7,7 +7,6 @@ use crate::windows::structs::{
 };
 use crate::windows::wrappers::{nt_query_information_process, nt_read_virtual_memory};
 use core::arch::asm;
-use core::slice::from_raw_parts;
 
 type Handle = usize;
 
@@ -29,7 +28,8 @@ pub fn unicode_to_string(u: &UnicodeString) -> String {
         return String::new();
     }
 
-    let slice = unsafe { from_raw_parts(u.buffer, (u.length / 2) as usize) };
+	let len = (u.length / 2) as usize;
+    let slice = unsafe { core::slice::from_raw_parts(u.buffer, len) };
     String::from_utf16_lossy(slice)
 }
 
@@ -115,10 +115,6 @@ pub fn get_export(base: *const u8, name: &str) -> Option<*const u8> {
             let name_ptr = base.add(name_rva as usize);
 
 			let export_name = core::ffi::CStr::from_ptr(name_ptr.cast());
-			// if name=="NtOpenProcess" {
-			// 	println!("{:?}", export_name.to_bytes());
-			// 	println!("{:?}", name_bytes);
-			// }
             if export_name.to_bytes() == name_bytes {
                 let ordinal_index = *address_of_name_ordinals.add(i as usize) as usize;
                 let func_rva = *address_of_functions.add(ordinal_index);

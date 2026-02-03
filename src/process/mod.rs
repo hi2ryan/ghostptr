@@ -55,6 +55,16 @@ impl Process {
         Self(CURRENT_PROCESS_HANDLE)
     }
 
+	/// Creates a [`Process`] struct using an already opened process handle.
+	/// 
+	/// # Safety
+	/// The caller must ensure that `handle` is a valid process handle with the
+	/// access that is required for what calls are to be made with this `Process`.
+	/// The handle will be closed when the `Process` is dropped.
+	pub unsafe fn from_handle(handle: Handle) -> Self {
+		Self(handle)
+	}
+
     /// Opens the process with the `pid` with `access`
     ///
     /// # Safety
@@ -1186,8 +1196,8 @@ mod tests {
             .expect("failed to get first module of remote process");
 
         let nt_open_process_addr = ntdll.get_export("NtOpenProcess")?;
-
-        let ssn = crate::windows::syscalls::syscalls().nt_open_process;
+		
+        let ssn = crate::windows::syscalls::ntdll::syscalls().nt_open_process;
         let ssn_bytes = ssn
             .to_le_bytes()
             .iter()

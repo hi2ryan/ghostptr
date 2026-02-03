@@ -1,11 +1,16 @@
-use crate::windows::{structs::{PsAttributeList, ThreadContext}};
+#[cfg(feature = "windows")]
+use crate::windows::structs::UnicodeString;
+use crate::windows::structs::{PsAttributeList, ThreadContext};
 
 use super::{
     Handle, NtStatus,
     structs::{ClientId, ObjectAttributes},
-    syscalls::syscalls,
+    syscalls::ntdll,
 };
 use core::{arch::asm, ffi::c_void};
+
+#[cfg(feature = "windows")]
+use super::syscalls::win32u;
 
 /* SYSCALL WRAPPERS */
 
@@ -18,7 +23,7 @@ pub fn nt_open_process(
     client_id: *mut ClientId,
 ) -> NtStatus {
     let status: NtStatus;
-    let id = syscalls().nt_open_process;
+    let id = ntdll::syscalls().nt_open_process;
 
     unsafe {
         asm!(
@@ -44,7 +49,7 @@ pub fn nt_open_process(
 #[inline(always)]
 pub fn nt_terminate_process(process_handle: Handle, exit_status: NtStatus) -> NtStatus {
     let status: NtStatus;
-    let id = syscalls().nt_terminate_process;
+    let id = ntdll::syscalls().nt_terminate_process;
 
     unsafe {
         asm!(
@@ -74,7 +79,7 @@ pub fn nt_read_virtual_memory(
     bytes_read: *mut usize,
 ) -> NtStatus {
     let status: NtStatus;
-    let id = syscalls().nt_read_virtual_memory;
+    let id = ntdll::syscalls().nt_read_virtual_memory;
 
     unsafe {
         asm!(
@@ -111,7 +116,7 @@ pub fn nt_write_virtual_memory(
     bytes_written: *mut usize,
 ) -> NtStatus {
     let status: NtStatus;
-    let id = syscalls().nt_write_virtual_memory;
+    let id = ntdll::syscalls().nt_write_virtual_memory;
 
     unsafe {
         asm!(
@@ -150,7 +155,7 @@ pub fn nt_query_virtual_memory(
     return_len: *mut usize,
 ) -> NtStatus {
     let status: NtStatus;
-    let id = syscalls().nt_query_virtual_memory;
+    let id = ntdll::syscalls().nt_query_virtual_memory;
 
     unsafe {
         asm!(
@@ -191,7 +196,7 @@ pub fn nt_protect_virtual_memory(
     old_protection: *mut u32,
 ) -> NtStatus {
     let status: NtStatus;
-    let id = syscalls().nt_protect_virtual_memory;
+    let id = ntdll::syscalls().nt_protect_virtual_memory;
 
     unsafe {
         asm!(
@@ -230,7 +235,7 @@ pub fn nt_allocate_virtual_memory(
     protection: u32,
 ) -> NtStatus {
     let status: NtStatus;
-    let id = syscalls().nt_allocate_virtual_memory;
+    let id = ntdll::syscalls().nt_allocate_virtual_memory;
 
     unsafe {
         asm!(
@@ -269,7 +274,7 @@ pub fn nt_free_virtual_memory(
     free_type: u32,
 ) -> NtStatus {
     let status: NtStatus;
-    let id = syscalls().nt_free_virtual_memory;
+    let id = ntdll::syscalls().nt_free_virtual_memory;
 
     unsafe {
         asm!(
@@ -300,7 +305,7 @@ pub fn nt_open_thread(
     client_id: *mut ClientId,
 ) -> NtStatus {
     let status: NtStatus;
-    let id = syscalls().nt_open_thread;
+    let id = ntdll::syscalls().nt_open_thread;
 
     unsafe {
         asm!(
@@ -339,36 +344,36 @@ pub fn nt_create_thread_ex(
     attribute_list: *mut PsAttributeList,
 ) -> NtStatus {
     let status: NtStatus;
-    let id = syscalls().nt_create_thread_ex;
+    let id = ntdll::syscalls().nt_create_thread_ex;
 
     unsafe {
         asm!(
             "sub rsp, 0x60",
             "mov [rsp + 0x28], {start_routine}",
             "mov [rsp + 0x30], {argument}",
-			"mov [rsp + 0x38], {create_flags:e}",
-			"mov [rsp + 0x40], {zero_bits}",
-			"mov [rsp + 0x48], {stack_size}",
-			"mov [rsp + 0x50], {maximum_stack_size}",
-			"mov [rsp + 0x58], {attribute_list}",
+            "mov [rsp + 0x38], {create_flags:e}",
+            "mov [rsp + 0x40], {zero_bits}",
+            "mov [rsp + 0x48], {stack_size}",
+            "mov [rsp + 0x50], {maximum_stack_size}",
+            "mov [rsp + 0x58], {attribute_list}",
 
             "mov r10, rcx",
             "syscall",
 
             "add rsp, 0x60",
 
-			in("rcx") thread_handle,
-			in("rdx") desired_access,
-			in("r8") object_attributes,
-			in("r9") process_handle,
+            in("rcx") thread_handle,
+            in("rdx") desired_access,
+            in("r8") object_attributes,
+            in("r9") process_handle,
 
-			start_routine = in(reg) start_routine,
-			argument = in(reg) argument,
-			create_flags = in(reg) create_flags,
-			zero_bits = in(reg) zero_bits,
-			stack_size = in(reg) stack_size,
-			maximum_stack_size = in(reg) maximum_stack_size,
-			attribute_list = in(reg) attribute_list,
+            start_routine = in(reg) start_routine,
+            argument = in(reg) argument,
+            create_flags = in(reg) create_flags,
+            zero_bits = in(reg) zero_bits,
+            stack_size = in(reg) stack_size,
+            maximum_stack_size = in(reg) maximum_stack_size,
+            attribute_list = in(reg) attribute_list,
 
             in("rax") id,
             lateout("rax") status,
@@ -384,7 +389,7 @@ pub fn nt_create_thread_ex(
 #[inline(always)]
 pub fn nt_terminate_thread(thread_handle: Handle, exit_status: NtStatus) -> NtStatus {
     let status: NtStatus;
-    let id = syscalls().nt_terminate_thread;
+    let id = ntdll::syscalls().nt_terminate_thread;
 
     unsafe {
         asm!(
@@ -408,7 +413,7 @@ pub fn nt_terminate_thread(thread_handle: Handle, exit_status: NtStatus) -> NtSt
 #[inline(always)]
 pub fn nt_suspend_thread(thread_handle: Handle, prev_suspend_count: *mut u32) -> NtStatus {
     let status: NtStatus;
-    let id = syscalls().nt_suspend_thread;
+    let id = ntdll::syscalls().nt_suspend_thread;
 
     unsafe {
         asm!(
@@ -432,7 +437,7 @@ pub fn nt_suspend_thread(thread_handle: Handle, prev_suspend_count: *mut u32) ->
 #[inline(always)]
 pub fn nt_resume_thread(thread_handle: Handle, prev_suspend_count: *mut u32) -> NtStatus {
     let status: NtStatus;
-    let id = syscalls().nt_resume_thread;
+    let id = ntdll::syscalls().nt_resume_thread;
 
     unsafe {
         asm!(
@@ -459,7 +464,7 @@ pub fn nt_get_context_thread(
     thread_context: *mut ThreadContext,
 ) -> NtStatus {
     let status: NtStatus;
-    let id = syscalls().nt_get_context_thread;
+    let id = ntdll::syscalls().nt_get_context_thread;
 
     unsafe {
         asm!(
@@ -486,7 +491,7 @@ pub fn nt_set_context_thread(
     thread_context: *const ThreadContext,
 ) -> NtStatus {
     let status: NtStatus;
-    let id = syscalls().nt_set_context_thread;
+    let id = ntdll::syscalls().nt_set_context_thread;
 
     unsafe {
         asm!(
@@ -515,7 +520,7 @@ pub fn nt_query_system_information(
     return_length: *mut u32,
 ) -> NtStatus {
     let status: NtStatus;
-    let id = syscalls().nt_query_system_information;
+    let id = ntdll::syscalls().nt_query_system_information;
 
     unsafe {
         asm!(
@@ -545,7 +550,7 @@ pub fn nt_query_information_process(
     return_length: *mut u32,
 ) -> NtStatus {
     let status: NtStatus;
-    let id = syscalls().nt_query_information_process;
+    let id = ntdll::syscalls().nt_query_information_process;
 
     unsafe {
         asm!(
@@ -585,7 +590,7 @@ pub fn nt_duplicate_object(
     options: u32,
 ) -> NtStatus {
     let status: NtStatus;
-    let id = syscalls().nt_duplicate_object;
+    let id = ntdll::syscalls().nt_duplicate_object;
 
     unsafe {
         asm!(
@@ -624,12 +629,12 @@ pub fn nt_duplicate_object(
 pub fn nt_query_object(
     handle: Handle,
     object_info_class: u32,
-	object_info: *mut c_void,
-	info_len: u32,
-	return_len: *mut u32,
+    object_info: *mut c_void,
+    info_len: u32,
+    return_len: *mut u32,
 ) -> NtStatus {
     let status: NtStatus;
-    let id = syscalls().nt_query_object;
+    let id = ntdll::syscalls().nt_query_object;
 
     unsafe {
         asm!(
@@ -660,8 +665,8 @@ pub fn nt_query_object(
 /// NtWaitForSingleObject
 #[inline(always)]
 pub fn nt_wait_for_single_object(handle: Handle, alertable: u8, timeout: *const i64) -> NtStatus {
- let status: NtStatus;
-    let id = syscalls().nt_wait_for_single_object;
+    let status: NtStatus;
+    let id = ntdll::syscalls().nt_wait_for_single_object;
 
     unsafe {
         asm!(
@@ -692,7 +697,7 @@ pub fn nt_query_information_thread(
     return_len: *mut u32,
 ) -> NtStatus {
     let status: NtStatus;
-    let id = syscalls().nt_query_information_thread;
+    let id = ntdll::syscalls().nt_query_information_thread;
 
     unsafe {
         asm!(
@@ -722,7 +727,7 @@ pub fn nt_query_information_thread(
 #[inline(always)]
 pub fn nt_close(handle: Handle) -> NtStatus {
     let status: NtStatus;
-    let id = syscalls().nt_close;
+    let id = ntdll::syscalls().nt_close;
 
     unsafe {
         asm!(
@@ -738,3 +743,142 @@ pub fn nt_close(handle: Handle) -> NtStatus {
 
     status
 }
+
+/* win32u.dll SYSCALL WRAPPERS */
+
+/// NtUserBuildHwndList
+#[cfg(feature = "windows")]
+#[allow(clippy::too_many_arguments)]
+#[inline(always)]
+pub fn nt_user_build_hwnd_list(
+    desktop_handle: Handle,
+    parent_window_handle: Handle,
+    include_children: i32,
+    exclude_immersive: i32,
+    thread_id: u32,
+    hwnd_list_information_length: u32,
+    hwnd_list_information: *mut core::ffi::c_void,
+    return_length: *mut u32,
+) -> NtStatus {
+    let status: NtStatus;
+    let id = win32u::syscalls().nt_user_build_hwnd_list;
+
+    unsafe {
+        asm!(
+            "sub rsp, 0x48",
+
+            "mov [rsp + 0x28], {thread_id:e}",
+            "mov [rsp + 0x30], {hwnd_list_info_len:e}",
+            "mov [rsp + 0x38], {hwnd_list_info}",
+			"mov [rsp + 0x40], {return_len}",
+
+            "mov r10, rcx",
+            "syscall",
+
+            "add rsp, 0x48",
+
+            in("rcx") desktop_handle,
+            in("rdx") parent_window_handle,
+            in("r8") include_children,
+            in("r9") exclude_immersive,
+
+            thread_id = in(reg) thread_id,
+            hwnd_list_info_len = in(reg) hwnd_list_information_length,
+            hwnd_list_info = in(reg) hwnd_list_information,
+			return_len = in(reg) return_length,
+
+            in("rax") id,
+            lateout("rax") status,
+            clobber_abi("system"),
+        )
+    }
+
+    status
+}
+
+/// NtUserQueryWindow
+#[cfg(feature = "windows")]
+#[inline(always)]
+pub fn nt_user_query_window(
+	hwnd: Handle,
+	class: u32,
+) -> u32 {
+	let result: u32;
+    let id = win32u::syscalls().nt_user_query_window;
+
+    unsafe {
+        asm!(
+            "mov r10, rcx",
+            "syscall",
+
+            in("rcx") hwnd,
+            in("rdx") class,
+
+            in("rax") id,
+            lateout("rax") result,
+            clobber_abi("system"),
+        );
+    }
+
+    result
+}
+
+/// NtUserInternalGetWindowText
+#[cfg(feature = "windows")]
+#[inline(always)]
+pub fn nt_user_internal_get_window_text(
+    hwnd: Handle,
+    buffer: *mut u16,
+    max_len: i32,
+) -> NtStatus {
+    let result: NtStatus;
+    let id = win32u::syscalls().nt_user_internal_get_window_text;
+
+    unsafe {
+        asm!(
+            "mov r10, rcx",
+            "syscall",
+
+            in("rcx") hwnd,
+            in("rdx") buffer,
+            in("r8")  max_len,
+
+            in("rax") id,
+            lateout("rax") result,
+            clobber_abi("system"),
+        );
+    }
+
+    result
+}
+
+/// NtUserGetClassName
+#[cfg(feature = "windows")]
+#[inline(always)]
+pub fn nt_user_get_class_name(
+    hwnd: Handle,                    // HWND
+    real: i32,                       // BOOL
+    class_name: *mut UnicodeString,  // PUNICODE_STRING
+) -> i32 {
+    let result: i32;
+    let id = win32u::syscalls().nt_user_get_class_name;
+
+    unsafe {
+        asm!(
+            "mov r10, rcx",
+            "syscall",
+
+            in("rcx") hwnd,
+            in("rdx") real,
+            in("r8")  class_name,
+
+            in("rax") id,
+            lateout("rax") result,
+            clobber_abi("system"),
+        );
+    }
+
+    result
+}
+
+
