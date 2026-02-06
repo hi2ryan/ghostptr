@@ -25,6 +25,12 @@ pub struct Section<'process, 'module> {
 
     /// The section characteristics flags.
     pub characteristics: SectionCharacteristics,
+
+	/// The size of the initialized data on disk, in bytes. 
+	pub raw_data_size: u32,
+
+	/// A file pointer to the first page.
+	pub raw_data_file_offset: u32,
 }
 
 impl<'process, 'module> Section<'process, 'module> {

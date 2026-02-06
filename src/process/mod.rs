@@ -568,8 +568,8 @@ impl Process {
             return Err(ProcessError::PartialRead(bytes_read));
         }
 
-        // SAFETY:
-        // the NtReadVirtualMemory syscall returned how many bytes we read
+        // Safety:
+        // the syscall returned how many bytes we read
         // therefore we know the length of the Vec
         unsafe {
             slice.set_len(len);

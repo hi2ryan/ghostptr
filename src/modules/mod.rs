@@ -329,6 +329,10 @@ impl<'process> Module<'process> {
                     address,
                     size,
                     characteristics,
+
+					raw_data_size: section.size_of_raw_data,
+					
+					raw_data_file_offset: section.pointer_to_raw_data
                 })
             }
         }
