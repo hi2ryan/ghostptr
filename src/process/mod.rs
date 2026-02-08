@@ -1,43 +1,37 @@
-pub mod ptr;
 pub mod region;
 pub mod scan;
 pub mod thread;
 pub mod utils;
 
-pub use crate::windows::flags::*;
-pub use ptr::AsPointer;
+use crate::windows::flags::*;
 pub use region::MemoryRegionIter;
 pub use scan::MemScanIter;
 pub use thread::Thread;
-pub use utils::*;
-
-use crate::windows::constants::CURRENT_PROCESS_HANDLE;
-use crate::windows::structs::{
-    ClientId, KernelUserTimes, MemoryBasicInformation, ObjectAttributes,
-    ProcessHandleSnapshotInformation, UnicodeString,
-};
-use crate::windows::utils::{
-    query_process_basic_info, query_process_handle_info, unicode_to_string_remote,
-};
-use crate::windows::wrappers::{
-    nt_allocate_virtual_memory, nt_close, nt_create_thread_ex, nt_duplicate_object,
-    nt_free_virtual_memory, nt_open_process, nt_protect_virtual_memory,
-    nt_query_information_process, nt_query_virtual_memory, nt_read_virtual_memory,
-    nt_terminate_process, nt_write_virtual_memory,
-};
-use crate::{ProcessError, ProcessIterator};
-use core::{fmt::Display, mem::MaybeUninit};
-
-use crate::{modules::Module, patterns::Scanner};
+pub use utils::{ExecutionTimes, MemoryAllocation, MemoryRegionInfo, ProcessHandleInfo};
 
 use crate::{
-    Result,
-    iter::{
-        module::{ModuleIterOrder, ModuleIterator},
-        thread::ThreadView,
+    error::{ProcessError, Result},
+    iter::{ModuleIterOrder, ModuleIterator, ProcessIterator, ThreadView},
+    modules::Module,
+    patterns::Scanner,
+    utils::{AddressRange, AsPointer},
+    windows::{
+        Handle, NtStatus,
+        constants::CURRENT_PROCESS_HANDLE,
+        structs::{
+            ClientId, KernelUserTimes, MemoryBasicInformation, ObjectAttributes,
+            ProcessHandleSnapshotInformation, UnicodeString,
+        },
+        utils::{query_process_basic_info, query_process_handle_info, unicode_to_string_remote},
+        wrappers::{
+            nt_allocate_virtual_memory, nt_close, nt_create_thread_ex, nt_duplicate_object,
+            nt_free_virtual_memory, nt_open_process, nt_protect_virtual_memory,
+            nt_query_information_process, nt_query_virtual_memory, nt_read_virtual_memory,
+            nt_terminate_process, nt_write_virtual_memory,
+        },
     },
-    windows::{Handle, NtStatus},
 };
+use core::{fmt::Display, mem::MaybeUninit};
 
 #[derive(Debug)]
 pub struct Process(Handle);
@@ -575,6 +569,51 @@ impl Process {
             slice.set_len(len);
         }
         Ok(slice)
+    }
+
+    /// Reads memory from the process into the provided slice.
+    ///
+    /// Copies `slice.len() * size_of::<T>()` bytes from the target process
+    /// into the given slice. The address may be any type implementing
+    /// [`AsPointer<T>`], like a raw pointer or integer address.
+    ///
+    /// # Access Rights
+    ///
+    /// Requires the process handle to have [`ProcessAccess::VM_READ`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ProcessError::NtStatus`] if reading fails, or
+    /// [`ProcessError::PartialRead`] if fewer bytes are read than requested.
+    pub fn read_to_slice<T: Copy>(
+        &self,
+        address: impl AsPointer<T>,
+        slice: &mut [T],
+    ) -> Result<()> {
+        if slice.is_empty() {
+            return Ok(());
+        }
+
+        let size = size_of_val(slice);
+        let mut bytes_read = 0;
+
+        let status = nt_read_virtual_memory(
+            self.0,
+            address.as_ptr() as _,
+            slice.as_mut_ptr().cast(),
+            size,
+            &mut bytes_read,
+        );
+
+        if status != 0 {
+            return Err(ProcessError::NtStatus(status));
+        }
+
+        if bytes_read != size {
+            return Err(ProcessError::PartialRead(bytes_read));
+        }
+
+        Ok(())
     }
 
     /// Reads a C string from the process' memory, continuing reading

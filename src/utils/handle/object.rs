@@ -10,6 +10,11 @@ use crate::{
 };
 use core::{mem::zeroed, ptr};
 
+#[allow(unused)]
+use super::SafeHandle;
+
+use crate::process::ProcessHandleInfo;
+
 /// Represents an object with a handle.
 /// Used to query information about the handle, such as
 /// the type, name, and granted access of it.
@@ -19,13 +24,13 @@ use core::{mem::zeroed, ptr};
 /// `HandleObject` does not automatically close the inner handle
 /// upon being dropped. The caller must ensure that
 /// the raw handle is closed once it is dropped, whether via 
-/// [close_handle][`crate::close_handle`] or a [SafeHandle][`crate::SafeHandle`] struct.
+/// [`close_handle`] or a [`SafeHandle`] struct.
 #[repr(transparent)]
 pub struct HandleObject(Handle);
 
 impl HandleObject {
 	/// Retrieves the underlying raw `Handle`.
-	/// #[inline(always)]
+	#[inline(always)]
     pub fn handle(&self) -> Handle {
         self.0
     }
@@ -41,6 +46,13 @@ impl HandleObject {
     pub fn close(&self) -> Result<()> {
         close_handle(self.0)
     }
+
+	/// Creates a `SafeHandle` around the raw `Handle`,
+	/// consuming the `HandleObject`.
+	#[inline(always)]
+	pub fn to_safe(self) -> SafeHandle {
+		SafeHandle(self.0)
+	}
 
     /// Duplicates the handle.
     ///
@@ -192,5 +204,12 @@ impl From<ProcessHandleEntry> for HandleObject {
 	#[inline(always)]
     fn from(value: ProcessHandleEntry) -> Self {
         Self(value.handle)
+    }
+}
+
+impl<'process> From<ProcessHandleInfo<'process>> for HandleObject {
+    #[inline(always)]
+    fn from(info: ProcessHandleInfo<'process>) -> Self {
+        HandleObject::from_handle(info.handle)
     }
 }

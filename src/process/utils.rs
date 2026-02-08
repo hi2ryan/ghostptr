@@ -1,44 +1,44 @@
 use crate::{
-    HandleObject, ProcessError, Result,
+    AllocationType, ProcessError, Result,
     process::{FreeType, MemoryProtection, MemoryState, MemoryType, Process},
+	utils::AddressRange,
     windows::{
         Handle,
         constants::{CURRENT_PROCESS_HANDLE, STATUS_INFO_LENGTH_MISMATCH},
         structs::{
-            KernelUserTimes, MemoryBasicInformation, ProcessHandleEntry, PublicObjectTypeInformation, UnicodeString
+            KernelUserTimes, MemoryBasicInformation, ProcessHandleEntry,
+            PublicObjectTypeInformation, UnicodeString,
         },
         utils::unicode_to_string,
         wrappers::{nt_duplicate_object, nt_query_object},
     },
 };
-use core::{ops::Range, time::Duration};
-
-pub type AddressRange = Range<usize>;
+use core::time::Duration;
 
 #[derive(Debug)]
 pub struct ExecutionTimes {
-	/// The creation time of the process or thread.
-	pub created_at: Duration,
+    /// The creation time of the process or thread.
+    pub created_at: Duration,
 
-	/// The exit time of the process or thread.
-	pub exited_at: Duration,
+    /// The exit time of the process or thread.
+    pub exited_at: Duration,
 
-	/// The amount of time the process has executed in kernel mode.
-	pub kernel_time: Duration,
+    /// The amount of time the process has executed in kernel mode.
+    pub kernel_time: Duration,
 
-	/// The amount of time the process has executed in user mode.
-	pub user_time: Duration,
+    /// The amount of time the process has executed in user mode.
+    pub user_time: Duration,
 }
 
 impl From<KernelUserTimes> for ExecutionTimes {
-	fn from(value: KernelUserTimes) -> Self {
-		Self {
-			created_at: Duration::from_nanos(value.create_time.max(0) as u64 * 100),
-			exited_at: Duration::from_nanos(value.exit_time.max(0) as u64 * 100),
-			kernel_time: Duration::from_nanos(value.kernel_time.max(0) as u64 * 100),
-			user_time: Duration::from_nanos(value.user_time.max(0) as u64 * 100),
-		}
-	}
+    fn from(value: KernelUserTimes) -> Self {
+        Self {
+            created_at: Duration::from_nanos(value.create_time.max(0) as u64 * 100),
+            exited_at: Duration::from_nanos(value.exit_time.max(0) as u64 * 100),
+            kernel_time: Duration::from_nanos(value.kernel_time.max(0) as u64 * 100),
+            user_time: Duration::from_nanos(value.user_time.max(0) as u64 * 100),
+        }
+    }
 }
 
 /// Represents queried information regarding region of virtual memory.
@@ -287,25 +287,32 @@ impl<'process> ProcessHandleInfo<'process> {
     }
 }
 
-impl<'process> From<ProcessHandleInfo<'process>> for HandleObject {
-    #[inline(always)]
-    fn from(val: ProcessHandleInfo<'process>) -> Self {
-        HandleObject::from_handle(val.handle)
-    }
-}
-
 /// Represents an allocated region in a process' memory.
 #[derive(Debug, Clone)]
 pub struct MemoryAllocation<'process> {
     pub(crate) process: &'process Process,
 
+    /// The base address of the memory allocation.
     pub address: usize,
+
+    /// The size of the memory allocation.
     pub size: usize,
 
+    /// The region size of the allocated memory.
     pub region_size: usize,
 }
 
 impl<'process> MemoryAllocation<'process> {
+    pub fn new(
+        process: &'process Process,
+        address: Option<usize>,
+        size: usize,
+        r#type: AllocationType,
+        protection: MemoryProtection,
+    ) -> Result<Self> {
+        process.alloc_mem(address, size, r#type, protection)
+    }
+
     #[inline(always)]
     pub fn free(&self, r#type: FreeType) -> Result<()> {
         self.process.free_mem(self.address, self.size, r#type)

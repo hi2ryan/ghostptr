@@ -4,7 +4,7 @@ use crate::{
     error::{ProcessError, Result},
     modules::Module,
     patterns::Pattern32,
-    process::AsPointer,
+    utils::AsPointer,
 };
 use core::mem::{offset_of, size_of};
 

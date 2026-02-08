@@ -2,13 +2,14 @@ pub mod section;
 pub mod export;
 pub mod import;
 
-pub use section::*;
-pub use export::*;
-pub use import::*;
+pub use section::Section;
+pub use export::Export;
+pub use import::{Import, ImportType};
 
 use core::{mem::offset_of, ffi::CStr};
 use crate::{
-    MemScanIter, ProcessError, Result, Scanner, SectionCharacteristics, process::{MemoryRegionIter, Process, utils::AddressRange}, windows::{
+	utils::AddressRange,
+    MemScanIter, ProcessError, Result, Scanner, SectionCharacteristics, process::{MemoryRegionIter, Process}, windows::{
         DllEntryPoint,
         structs::{
             ImageDataDirectory, ImageDosHeader, ImageExportDirectory, ImageImportDescriptor, ImageNtHeaders64, ImageOptionalHeader64, ImageSectionHeader

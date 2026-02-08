@@ -1,7 +1,10 @@
 use crate::{
-    Result,
-    process::{ThreadAccess, thread::Thread},
-    windows::structs::{ThreadState, ThreadWaitReason},
+    error::Result,
+    process::thread::Thread,
+    windows::{
+        flags::ThreadAccess,
+        structs::{ThreadState, ThreadWaitReason},
+    },
 };
 
 /// Represents information regarding a process' thread
@@ -33,7 +36,7 @@ pub struct ThreadView {
 }
 
 impl ThreadView {
-	/// Opens the thread.
+    /// Opens the thread.
     pub fn open(&self, access: ThreadAccess) -> Result<Thread> {
         Thread::open(self.tid, access)
     }

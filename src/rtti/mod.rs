@@ -1,5 +1,5 @@
-mod structs;
-mod module;
+pub mod structs;
+pub mod module;
 
 pub use structs::*;
 pub use module::ModuleRTTIExt;

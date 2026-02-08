@@ -1,10 +1,9 @@
 use crate::{
     Process, ProcessError, Result,
     iter::thread::ThreadView,
-    process::ProcessAccess,
     windows::{
         constants::STATUS_INFO_LENGTH_MISMATCH, structs::SystemProcessInformation,
-        utils::unicode_to_string, wrappers::nt_query_system_information,
+        utils::unicode_to_string, wrappers::nt_query_system_information, flags::ProcessAccess,
     },
 };
 
