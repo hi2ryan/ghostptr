@@ -1,4 +1,4 @@
-use crate::{AddressRange, MemoryRegionInfo, Process};
+use crate::{AddressRange, MemoryRegionInfo, Process, constants::PAGE_SIZE};
 
 pub struct MemoryRegionIter<'process> {
     process: &'process Process,
@@ -31,17 +31,17 @@ impl<'process> Iterator for MemoryRegionIter<'process> {
                 Ok(info) => break info,
                 Err(_) => {
                     // query failed, move a page forward
-                    self.current_addr += 0x1000;
+                    self.current_addr += PAGE_SIZE;
                     continue;
                 }
             }
         };
 
-        if info.region_size == 0 {
+        if info.size == 0 {
             return None;
         }
 
-		self.current_addr += info.region_size;
+		self.current_addr += info.size;
         Some(info)
     }
 }

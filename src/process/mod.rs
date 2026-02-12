@@ -22,7 +22,7 @@ use crate::{
             ClientId, KernelUserTimes, MemoryBasicInformation, ObjectAttributes,
             ProcessHandleSnapshotInformation, UnicodeString,
         },
-        utils::{query_process_basic_info, query_process_handle_info, unicode_to_string_remote},
+        utils::{query_process_basic_info, query_process_handle_info},
         wrappers::{
             nt_allocate_virtual_memory, nt_close, nt_create_thread_ex, nt_duplicate_object,
             nt_free_virtual_memory, nt_open_process, nt_protect_virtual_memory,
@@ -154,7 +154,7 @@ impl Process {
         // RTL_USER_PROCESS_PARAMETERS->ImagePathName
         let image_path: UnicodeString = self.read_mem(params_ptr + 0x60)?;
 
-        Ok(unicode_to_string_remote(self.0, &image_path))
+        self.read_unicode_string(&image_path)
     }
 
     /// Retrieves the image name of the process using its path.
@@ -1017,6 +1017,19 @@ impl Process {
         range: AddressRange,
     ) -> MemoryRegionIter<'process> {
         MemoryRegionIter::new(self, range)
+    }
+
+    pub(crate) fn read_unicode_string(&self, unicode_string: &UnicodeString) -> Result<String> {
+        let ptr = unicode_string.buffer;
+        if ptr.is_null() || unicode_string.length == 0 {
+            return Err(ProcessError::InvalidUnicodeString);
+        }
+
+        let len = (unicode_string.length / 2) as usize;
+        let mut buf = vec![0u16; len];
+        self.read_to_slice(unicode_string.buffer, &mut buf)?;
+
+        Ok(String::from_utf16_lossy(&buf))
     }
 }
 

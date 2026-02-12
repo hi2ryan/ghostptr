@@ -33,6 +33,43 @@ pub struct LdrModule {
     pub tls_index: u16,
     pub hash_table_entry: ListEntry,
     pub time_datestamp: u32,
+	pub entry_point_activation_context: *const c_void,
+	pub lock: *const c_void,
+	pub ddag_node: *const c_void,
+	pub node_module_link: ListEntry,
+	pub load_context: *const c_void,
+	pub parent_dll_base: *const c_void,
+	pub switch_back_context: *const c_void,
+	pub base_address_index_node: RtlBalancedNode,
+	pub mapping_info_index_node: RtlBalancedNode,
+	pub original_base: *const c_void,
+	pub load_time: i64,
+	pub base_name_hash_value: u32,
+	pub load_reason: LdrDllLoadReason,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct RtlBalancedNode {
+	pub left: *const RtlBalancedNode,
+	pub right: *const RtlBalancedNode,
+	pub parent_value: usize,
+}
+
+#[repr(i32)]
+#[derive(Clone, Copy)]
+pub enum LdrDllLoadReason {
+    Unknown = -1,
+    StaticDependency = 0,
+    StaticForwarderDependency = 1,
+    DynamicForwarderDependency = 2,
+    DelayloadDependency = 3,
+    DynamicLoad = 4,
+    AsImageLoad = 5,
+    AsDataLoad = 6,
+    EnclavePrimary = 7,
+    EnclaveDependency = 8,
+    PatchImage = 9,
 }
 
 #[repr(C)]

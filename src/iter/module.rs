@@ -3,7 +3,7 @@ use crate::{
     process::Process,
     windows::{
         structs::{LdrModule, ListEntry, PebLoaderData, ProcessEnvBlock},
-        utils::{query_process_basic_info, unicode_to_string_remote},
+        utils::query_process_basic_info,
     },
 };
 use core::mem::offset_of;
@@ -35,13 +35,13 @@ impl<'process> ModuleIterator<'process> {
 
         // read PEB->LDR address
         let ldr_address: usize =
-            process.read_mem(peb_address as usize + offset_of!(ProcessEnvBlock, ldr))?;
+		process.read_mem(peb_address as usize + offset_of!(ProcessEnvBlock, ldr))?;
 
         let offset = match order {
-            ModuleIterOrder::Load => offset_of!(PebLoaderData, in_load_order_module_list),
+			ModuleIterOrder::Load => offset_of!(PebLoaderData, in_load_order_module_list),
             ModuleIterOrder::Memory => offset_of!(PebLoaderData, in_memory_order_module_list),
             ModuleIterOrder::Initialization => {
-                offset_of!(PebLoaderData, in_initialization_order_module_list)
+				offset_of!(PebLoaderData, in_initialization_order_module_list)
             }
         };
         let head = (ldr_address + offset) as *const ListEntry;
@@ -55,6 +55,10 @@ impl<'process> ModuleIterator<'process> {
             head,
             next,
         })
+    }
+
+    pub fn dlls(self) -> impl Iterator<Item = Module<'process>> {
+        self.filter(|module| module.is_dll())
     }
 }
 
@@ -83,10 +87,6 @@ impl<'process> Iterator for ModuleIterator<'process> {
         // read module
         let module: LdrModule = self.process.read_mem(entry).expect("failed to read mem");
 
-        let handle = unsafe { self.process.handle() };
-        let name = unicode_to_string_remote(handle, &module.base_dll_name);
-        let full_name = unicode_to_string_remote(handle, &module.full_dll_name);
-
         // update next entry
         self.next = match self.order {
             ModuleIterOrder::Load => module.in_load_order_module_list.next,
@@ -94,15 +94,6 @@ impl<'process> Iterator for ModuleIterator<'process> {
             ModuleIterOrder::Initialization => module.in_initialization_order_module_list.next,
         };
 
-        Some(Module {
-            process: self.process,
-
-            name,
-            full_name,
-            base_address: module.base_address as _,
-            entry_point: module.entry_point,
-            image_size: module.size_of_image,
-            flags: module.flags,
-        })
+        Some(Module::from_raw_ldr_entry(self.process, module))
     }
 }

@@ -51,7 +51,7 @@ impl<'process, 'scanner, S: Scanner> Iterator for MemScanIter<'process, 'scanner
 
 			// clamp region to provided address range
             let region_start = info.base_address;
-            let region_end = info.base_address.saturating_add(info.region_size);
+            let region_end = info.base_address.saturating_add(info.size);
 
             let start = self.range.start.max(region_start);
             let end = self.range.end.min(region_end);

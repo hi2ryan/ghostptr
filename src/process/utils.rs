@@ -61,7 +61,7 @@ pub struct MemoryRegionInfo {
     pub partition_id: u16,
 
     /// The size of this region in bytes.
-    pub region_size: usize,
+    pub size: usize,
 
     /// The current state of the memory region.
     pub state: MemoryState,
@@ -125,7 +125,7 @@ impl MemoryRegionInfo {
     /// Returns the virtual address range covered by this memory region.
     #[inline(always)]
     pub fn virtual_range(&self) -> AddressRange {
-        let end = self.base_address.saturating_add(self.region_size);
+        let end = self.base_address.saturating_add(self.size);
         self.base_address..end
     }
 }
@@ -138,7 +138,7 @@ impl From<MemoryBasicInformation> for MemoryRegionInfo {
             allocation_base: value.allocation_base as _,
             allocation_protection: MemoryProtection::from_bits(value.allocation_protection),
             partition_id: value.partition_id,
-            region_size: value.region_size,
+            size: value.region_size,
             state: MemoryState::from_bits(value.state),
             protection: MemoryProtection::from_bits(value.protection),
             r#type: MemoryType::from_bits(value.r#type),

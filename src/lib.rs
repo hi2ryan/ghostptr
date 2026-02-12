@@ -18,6 +18,7 @@
 compile_error!("ghostptr only works for win64 atm");
 
 mod windows;
+mod constants;
 
 pub mod error;
 pub mod iter;
