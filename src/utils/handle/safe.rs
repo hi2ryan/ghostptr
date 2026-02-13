@@ -17,6 +17,7 @@ impl SafeHandle {
 }
 
 impl From<Handle> for SafeHandle {
+	#[inline(always)]
     fn from(value: Handle) -> Self {
         Self(value)
     }

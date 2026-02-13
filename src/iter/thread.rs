@@ -3,7 +3,7 @@ use crate::{
     process::thread::Thread,
     windows::{
         flags::ThreadAccess,
-        structs::{ThreadState, ThreadWaitReason},
+        structs::{SystemThreadInformation, ThreadState, ThreadWaitReason},
     },
 };
 
@@ -36,8 +36,23 @@ pub struct ThreadView {
 }
 
 impl ThreadView {
-    /// Opens the thread.
+    /// Opens the thread with the desired access.
+	#[inline(always)]
     pub fn open(&self, access: ThreadAccess) -> Result<Thread> {
         Thread::open(self.tid, access)
+    }
+
+	#[inline(always)]
+    pub(crate) fn from_raw_system_thread_info(pid: u32, info: &SystemThreadInformation) -> Self {
+        Self {
+            start_address: info.start_address as usize,
+            tid: info.client_id.unique_thread as u32,
+            priority: info.priority,
+            base_priority: info.base_priority,
+            context_switches: info.context_switches,
+            state: info.state,
+            wait_reason: info.wait_reason,
+            pid,
+        }
     }
 }

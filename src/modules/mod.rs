@@ -177,6 +177,11 @@ impl<'process> Module<'process> {
         self.flags
     }
 
+	#[inline(always)]
+	pub fn process(&self) -> &'process Process {
+		self.process
+	}
+
     /// Enumerates all exports from this module.
     ///
     /// Parses the PE headers in the target process, walks the export

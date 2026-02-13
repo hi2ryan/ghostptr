@@ -1,6 +1,7 @@
 use crate::{
     ProcessError, Result,
     process::{ThreadAccess, ThreadContextFlags, utils::ExecutionTimes},
+	utils::SafeHandle,
     windows::{
         Handle, NtStatus,
         constants::CURRENT_THREAD_HANDLE,
@@ -14,7 +15,7 @@ use crate::{
         },
     },
 };
-use core::{mem::MaybeUninit, ptr, time::Duration};
+use core::{mem::{ManuallyDrop, MaybeUninit}, ptr, time::Duration};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WaitResult {
@@ -51,12 +52,27 @@ impl Thread {
         self.0
     }
 
+	/// Consumes the [`Thread`] and returns the underlying handle without closing it.
+	#[inline(always)]
+	pub fn into_handle(self) -> Handle {
+		let thread = ManuallyDrop::new(self);
+		thread.0
+	}
+
+	/// Consumes the [`Thread`] and returns the a [`SafeHandle`] containing
+	/// the underlying thread handle.
+	#[inline(always)]
+	pub fn into_safe_handle(self) -> SafeHandle {
+		let thread = ManuallyDrop::new(self);
+		SafeHandle::from(thread.0)
+	}
+
     /// Opens an existing thread.
     ///
     /// # Errors
     ///
-    /// Returns [`ProcessError::NtStatus`]
-    /// if the an invalid PID, TID, or access mask is passed.
+    /// Returns [`ProcessError::NtStatus`] if the thread identifier
+	/// or access mask is invalid.
     pub fn open(tid: u32, access: ThreadAccess) -> Result<Self> {
         let mut client_id = ClientId {
             unique_process: 0,
@@ -133,13 +149,13 @@ impl Thread {
     ///
     /// # Parameters
     ///
-    /// - `timeout`:  
-    ///   An optional duration to wait.  
-    ///   - `None` waits indefinitely.  
-    ///   - `Some(d)` waits up to `d`.  
+    /// - `timeout`:
+    ///   An optional duration to wait.
+    ///   - `None` waits indefinitely.
+    ///   - `Some(d)` waits up to `d`.
     ///
-    /// - `allow_apc`:  
-    ///   If `true`, the wait may return early due to queued APCs.  
+    /// - `allow_apc`:
+    ///   If `true`, the wait may return early due to queued APCs.
     ///
     /// # Returns
     ///

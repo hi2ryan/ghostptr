@@ -14,7 +14,7 @@ use crate::{
     iter::{ModuleIterOrder, ModuleIterator, ProcessIterator, ThreadView},
     modules::Module,
     patterns::Scanner,
-    utils::{AddressRange, AsPointer},
+    utils::{AddressRange, AsPointer, SafeHandle},
     windows::{
         Handle, NtStatus,
         constants::CURRENT_PROCESS_HANDLE,
@@ -31,7 +31,7 @@ use crate::{
         },
     },
 };
-use core::{fmt::Display, mem::MaybeUninit};
+use core::{fmt::Display, mem::{ManuallyDrop, MaybeUninit}};
 
 #[derive(Debug)]
 pub struct Process(Handle);
@@ -227,6 +227,21 @@ impl Process {
     pub unsafe fn handle(&self) -> Handle {
         self.0
     }
+
+	/// Consumes the [`Process`] and returns the underlying handle without closing it.
+	#[inline(always)]
+	pub fn into_handle(self) -> Handle {
+		let process = ManuallyDrop::new(self);
+		process.0
+	}
+
+	/// Consumes the [`Process`] and returns the a [`SafeHandle`] containing
+	/// the underlying process handle.
+	#[inline(always)]
+	pub fn into_safe_handle(self) -> SafeHandle {
+		let process = ManuallyDrop::new(self);
+		SafeHandle::from(process.0)
+	}
 
     /// Queries the handles that the process has open.
     ///

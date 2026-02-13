@@ -1,9 +1,12 @@
+use core::ptr;
+
 use crate::{
     Process, ProcessError, Result,
     iter::thread::ThreadView,
     windows::{
-        constants::STATUS_INFO_LENGTH_MISMATCH, structs::SystemProcessInformation,
-        utils::unicode_to_string, wrappers::nt_query_system_information, flags::ProcessAccess,
+        constants::STATUS_INFO_LENGTH_MISMATCH, flags::ProcessAccess,
+        structs::SystemProcessInformation, utils::unicode_to_string,
+        wrappers::nt_query_system_information,
     },
 };
 
@@ -12,10 +15,6 @@ use crate::{
 pub struct ProcessView {
     /// The process's unique identifier.
     pub pid: u32,
-
-    /// The identifier of the process that created this process.
-    /// Not updated and incorrectly refers to processes with recycled identifiers.
-    pub parent_pid: u32,
 
     /// The file name of the executable image.
     pub name: String,
@@ -45,41 +44,48 @@ impl ProcessView {
 
 /// Iterates all system processes.
 pub struct ProcessIterator {
-    buffer: Vec<u8>,
-    offset: usize,
+    _data: Box<[u8]>, // we need to keep this alive because ptr points to the data
+    ptr: *const SystemProcessInformation,
     finished: bool,
 }
 
 impl ProcessIterator {
     pub fn new() -> Result<Self> {
-        let mut size: usize = 0;
+        let mut size = 0u32;
+        // first call to get the length of the buffer
+        nt_query_system_information(
+            0x05, // SystemProcessInformation
+            ptr::null_mut(),
+            size as _,
+            &mut size,
+        );
 
         loop {
-            let mut buffer = vec![0u8; size];
-            let mut ret_len: u32 = 0;
-
+            let mut data = vec![0u8; size as usize];
             let status = nt_query_system_information(
                 0x05, // SystemProcessInformation
-                buffer.as_mut_ptr() as _,
+                data.as_mut_ptr().cast(),
                 size as _,
-                &mut ret_len,
+                &mut size,
             );
 
             if status == STATUS_INFO_LENGTH_MISMATCH {
-                // size is already updated with the size required
-                // add 8kb just in case new processes are created as we are querying
-                size += 0x2000;
+                // retry with the updated length
                 continue;
             }
 
             if status != 0x0 {
-                // success
+                // error
                 return Err(ProcessError::NtStatus(status));
             }
 
+            // put data on the heap
+            let data = data.into_boxed_slice();
+            let ptr = data.as_ptr() as *const SystemProcessInformation;
+
             return Ok(Self {
-                buffer,
-                offset: 0,
+                _data: data,
+                ptr,
                 finished: false,
             });
         }
@@ -100,46 +106,44 @@ impl Iterator for ProcessIterator {
             return None;
         }
 
-        unsafe {
-            let base = self.buffer.as_ptr();
-            let spi = &*(base.add(self.offset) as *const SystemProcessInformation);
+        // Safety:
+        // self.ptr points into self._data which was initialized when
+        // the struct was created and is valid for the entire lifetime duration
+        let info = unsafe { &*self.ptr };
 
-            let pid = spi.unique_process_id as u32;
-            let parent_pid = spi.inherited_from_unique_process_id as u32;
-            let name = unicode_to_string(&spi.image_name);
-            let thread_count = spi.number_of_threads;
+		// read basic information
+        let pid = info.unique_process_id as u32;
+        let name = unicode_to_string(&info.image_name);
+        let thread_count = info.number_of_threads;
 
-            // get next offset
-            if spi.next_entry_offset == 0 {
-                self.finished = true;
-            } else {
-                self.offset += spi.next_entry_offset as usize;
+        if info.next_entry_offset == 0 {
+            // finished
+            self.finished = true;
+        } else {
+            // Safety:
+            // we validated that next entry offset is non-zero, which, in that case
+            // would be the end of the entries
+            unsafe {
+                self.ptr = self.ptr.byte_add(info.next_entry_offset as usize);
             }
-
-            let threads = core::slice::from_raw_parts(spi.threads.as_ptr(), thread_count as usize);
-
-            // convert SystemThreadInformation to ThreadView's
-            let threads = threads
-                .iter()
-                .map(|&info| ThreadView {
-                    start_address: info.start_address as usize,
-                    tid: info.client_id.unique_thread as u32,
-                    priority: info.priority,
-                    base_priority: info.base_priority,
-                    context_switches: info.context_switches,
-                    state: info.state,
-                    wait_reason: info.wait_reason,
-                    pid,
-                })
-                .collect();
-
-            Some(ProcessView {
-                pid,
-                parent_pid,
-                name,
-                threads,
-            })
         }
+
+        // Safety:
+        // we know the number of threads (SystemProcessInformation->number_of_threads)
+        let threads =
+            unsafe { core::slice::from_raw_parts(info.threads.as_ptr(), thread_count as usize) };
+
+        // convert threads
+        let threads = threads
+            .iter()
+            .map(|info| ThreadView::from_raw_system_thread_info(pid, info))
+            .collect();
+
+        Some(ProcessView {
+            pid,
+            name,
+            threads,
+        })
     }
 }
 
