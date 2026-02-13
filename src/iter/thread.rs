@@ -9,6 +9,7 @@ use crate::{
 
 /// Represents information regarding a process' thread
 /// that has not been opened to a handle.
+#[derive(Debug, Clone)]
 pub struct ThreadView {
     /// The initial start address of the thread.
     pub start_address: usize,

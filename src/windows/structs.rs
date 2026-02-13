@@ -33,27 +33,27 @@ pub struct LdrModule {
     pub tls_index: u16,
     pub hash_table_entry: ListEntry,
     pub time_datestamp: u32,
-	pub entry_point_activation_context: *const c_void,
-	pub lock: *const c_void,
-	pub ddag_node: *const c_void,
-	pub node_module_link: ListEntry,
-	pub load_context: *const c_void,
-	pub parent_dll_base: *const c_void,
-	pub switch_back_context: *const c_void,
-	pub base_address_index_node: RtlBalancedNode,
-	pub mapping_info_index_node: RtlBalancedNode,
-	pub original_base: *const c_void,
-	pub load_time: i64,
-	pub base_name_hash_value: u32,
-	pub load_reason: LdrDllLoadReason,
+    pub entry_point_activation_context: *const c_void,
+    pub lock: *const c_void,
+    pub ddag_node: *const c_void,
+    pub node_module_link: ListEntry,
+    pub load_context: *const c_void,
+    pub parent_dll_base: *const c_void,
+    pub switch_back_context: *const c_void,
+    pub base_address_index_node: RtlBalancedNode,
+    pub mapping_info_index_node: RtlBalancedNode,
+    pub original_base: *const c_void,
+    pub load_time: i64,
+    pub base_name_hash_value: u32,
+    pub load_reason: LdrDllLoadReason,
 }
 
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct RtlBalancedNode {
-	pub left: *const RtlBalancedNode,
-	pub right: *const RtlBalancedNode,
-	pub parent_value: usize,
+    pub left: *const RtlBalancedNode,
+    pub right: *const RtlBalancedNode,
+    pub parent_value: usize,
 }
 
 #[repr(i32)]
@@ -254,11 +254,11 @@ pub struct ImageExportDirectory {
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct ImageImportDescriptor {
-	pub original_first_thunk: u32,
-	pub time_date_stamp: u32,
-	pub forwarder_chain: u32,
-	pub name: u32,
-	pub first_thunk: u32,
+    pub original_first_thunk: u32,
+    pub time_date_stamp: u32,
+    pub forwarder_chain: u32,
+    pub name: u32,
+    pub first_thunk: u32,
 }
 
 #[repr(u32)]
@@ -612,8 +612,28 @@ pub struct ObjectBasicInformation {
 
 #[repr(C)]
 pub struct KernelUserTimes {
-	pub create_time: i64,
-	pub exit_time: i64,
-	pub kernel_time: i64,
-	pub user_time: i64,
+    pub create_time: i64,
+    pub exit_time: i64,
+    pub kernel_time: i64,
+    pub user_time: i64,
+}
+
+#[repr(C)]
+pub struct RtlProcessModules {
+    pub count: u32,
+    pub modules: [RtlProcessModuleInformation; 1],
+}
+
+#[repr(C)]
+pub struct RtlProcessModuleInformation {
+    pub section: *mut c_void,
+    pub mapped_base: *mut c_void,
+    pub image_base: *mut c_void,
+    pub image_size: u32,
+    pub flags: u32,
+    pub load_order_index: u16,
+    pub init_order_index: u16,
+    pub load_count: u16,
+    pub offset_to_file_name: u16,
+    pub full_path_name: [u8; 256],
 }

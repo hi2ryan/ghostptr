@@ -17,8 +17,8 @@
 #[cfg(not(docsrs))]
 compile_error!("ghostptr only works for win64 atm");
 
-mod windows;
 mod constants;
+mod windows;
 
 pub mod error;
 pub mod iter;
@@ -36,7 +36,10 @@ pub use rtti::{ModuleRTTIExt, RTTIObject};
 /* EXPORTS */
 
 pub use error::{ProcessError, Result};
-pub use iter::{ModuleIterOrder, ModuleIterator, ProcessIterator, ProcessView, ThreadView};
+pub use iter::{
+    ModuleIterOrder, ModuleIterator, ProcessIterator, ProcessView, SystemModuleIterator,
+    SystemModuleView, ThreadView,
+};
 pub use modules::{Export, Import, ImportType, Module, Section};
 pub use patterns::{Pattern16, Pattern32, Scanner};
 pub use process::{
