@@ -1,4 +1,4 @@
-use core::{ops::Deref, fmt::Debug};
+use core::{fmt::Debug, mem::ManuallyDrop, ops::Deref};
 
 use crate::windows::{Handle, wrappers::nt_close};
 use super::HandleObject;
@@ -9,10 +9,12 @@ use super::HandleObject;
 pub struct SafeHandle(pub Handle);
 
 impl SafeHandle {
-    /// Creates a `HandleObject` from this handle, consuming itself.
+    /// Consumes the [`SafeHandle`] and returns the a [`HandleObject`] containing
+	/// the underlying handle.
     #[inline(always)]
     pub fn to_object(self) -> HandleObject {
-        HandleObject::from_handle(self.0)
+		let safe_handle = ManuallyDrop::new(self);
+        HandleObject::from_handle(safe_handle.0)
     }
 }
 

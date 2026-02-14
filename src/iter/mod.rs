@@ -2,6 +2,7 @@ pub mod module;
 pub mod process;
 pub mod system_module;
 pub mod thread;
+pub mod handle;
 
 pub use module::{ModuleIterOrder, ModuleIterator};
 pub use process::{ProcessIterator, ProcessView};

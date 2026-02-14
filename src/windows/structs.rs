@@ -637,3 +637,22 @@ pub struct RtlProcessModuleInformation {
     pub offset_to_file_name: u16,
     pub full_path_name: [u8; 256],
 }
+
+#[repr(C)]
+pub struct SystemHandleTableEntryInfoEx {
+    pub object: usize,
+    pub unique_process_id: usize,
+    pub handle_value: usize,
+    pub granted_access: u32,
+    pub creator_backtrace_index: u16,
+    pub object_type_index: u16,
+    pub handle_attributes: u32,
+    pub reserved: u32,
+}
+
+#[repr(C)]
+pub struct SystemHandleInformationEx {
+    pub number_of_handles: usize,
+    pub reserved: usize,
+    pub handles: [SystemHandleTableEntryInfoEx; 1],
+}

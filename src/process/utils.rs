@@ -158,7 +158,7 @@ pub struct ProcessHandleInfo<'process> {
     pub access: u32,
 
     /// The type identifier of the object
-    pub object_type: u32,
+    pub object_type_index: u32,
 
     /// The number of references to the handle.
     pub count: usize,
@@ -166,7 +166,7 @@ pub struct ProcessHandleInfo<'process> {
     /// The number of pointers to the handle.
     pub pointer_count: usize,
 
-    /// The attributes of the handle.
+    /// Handle attributes (e.g., PROTECT_FROM_CLOSE, INHERIT).
     pub attributes: u32,
 }
 
@@ -279,7 +279,7 @@ impl<'process> ProcessHandleInfo<'process> {
             process,
             handle: entry.handle,
             access: entry.access,
-            object_type: entry.object_type_index,
+            object_type_index: entry.object_type_index,
             count: entry.count,
             pointer_count: entry.pointer_count,
             attributes: entry.handle_attributes,

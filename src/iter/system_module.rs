@@ -8,42 +8,63 @@ use crate::{
 };
 use core::ptr;
 
-/// Represents information regarding a system module.
+/// Represents information regarding a loaded system module.
 #[derive(Debug, Clone)]
 pub struct SystemModuleView {
+	/// The module's file name
+	///
+	/// (e.g. ndistapi.sys)
     pub name: String,
+
+	/// The full NT path to the module
+	///
+	/// (e.g., `"\\SystemRoot\\System32\\drivers\\ndistapi.sys"`)
     pub full_name: String,
 
-    pub image_base: usize,
+	/// Size of the mapped image in bytes.
     pub image_size: usize,
+
+	/// Module flags reported by the system.
+    pub flags: u32,
+
+	/// Reference count maintained by the loader.
+    pub load_count: u16,
+
+	/// Index of the module in the loader's load‑order list.
+    pub load_order_index: u16,
+
+	/// Index of the module in the loader's initialization‑order list.
+    pub init_order_index: u16,
 }
 
 impl SystemModuleView {
+	#[inline(always)]
     pub(crate) fn from_raw_module_info(info: &RtlProcessModuleInformation) -> Self {
         let file_name_offset = info.offset_to_file_name as usize;
-		let path = info.full_path_name;
+        let path = info.full_path_name;
 
         let len = path.iter().position(|&c| c == 0).unwrap_or(path.len());
 
         let name = String::from_utf8_lossy(&path[file_name_offset..len]).to_string();
         let full_name = String::from_utf8_lossy(&path[..len]).to_string();
 
-        let image_base = info.image_base as usize;
         let image_size = info.image_size as usize;
 
         Self {
             name,
             full_name,
-
-            image_base,
             image_size,
+            flags: info.flags,
+            load_count: info.load_count,
+            load_order_index: info.load_order_index,
+            init_order_index: info.init_order_index,
         }
     }
 }
 
 /// Iterates all system modules.
 pub struct SystemModuleIterator {
-    data: Box<[u8]>,
+    _data: Box<[u8]>,
     ptr: *const RtlProcessModuleInformation,
 
     idx: u32,
@@ -87,14 +108,14 @@ impl SystemModuleIterator {
             // was successful, therefore it filled the buffer
             let (len, ptr) = unsafe {
                 let info = &*data.as_ptr().cast::<RtlProcessModules>();
-				let count = info.count;
-				let ptr = info.modules.as_ptr();
+                let count = info.count;
+                let ptr = info.modules.as_ptr();
 
-				(count, ptr)
+                (count, ptr)
             };
 
             return Ok(Self {
-                data,
+                _data: data,
                 ptr,
                 idx: 0,
                 len,
@@ -132,9 +153,11 @@ mod tests {
 
     #[test]
     fn system_modules() -> Result<()> {
-        for module in SystemModuleIterator::new()? {
-            println!("{:?}", module);
-        }
+        let mut drivers = SystemModuleIterator::new()?;
+        assert!(
+            drivers.any(|driver| driver.name == "ndistapi.sys"),
+            "default windows driver (system module) not found: ndistapi.sys"
+        );
 
         Ok(())
     }
