@@ -13,3 +13,6 @@ pub type DllEntryPoint = extern "system" fn(
     reason: u32,
     context: *const core::ffi::c_void,
 );
+
+pub type ProcessInstrumentationCallback =
+    extern "system" fn(original_rsp: u64, return_address: u64, return_value: u64);

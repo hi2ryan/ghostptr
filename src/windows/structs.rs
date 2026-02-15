@@ -656,3 +656,28 @@ pub struct SystemHandleInformationEx {
     pub reserved: usize,
     pub handles: [SystemHandleTableEntryInfoEx; 1],
 }
+
+#[repr(C)]
+pub struct ProcessInstrumentationCallbackInfo {
+	pub version: u32,
+	pub reserved: u32,
+	pub callback: *mut c_void,
+}
+
+#[repr(C)]
+pub struct TokenPrivileges {
+    pub privilege_count: u32,
+    pub privileges: [LuidAndAttributes; 1],
+}
+
+#[repr(C)]
+pub struct LuidAndAttributes {
+    pub luid: Luid,
+    pub attributes: u32,
+}
+
+#[repr(C)]
+pub struct Luid {
+    pub low_part: u32,
+    pub high_part: i32,
+}

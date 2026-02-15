@@ -3,7 +3,10 @@ pub mod scan;
 pub mod thread;
 pub mod utils;
 
-use crate::windows::flags::*;
+use crate::windows::{
+    ProcessInstrumentationCallback, flags::*, structs::ProcessInstrumentationCallbackInfo,
+    wrappers::nt_set_information_process,
+};
 pub use region::MemoryRegionIter;
 pub use scan::MemScanIter;
 pub use thread::Thread;
@@ -31,22 +34,36 @@ use crate::{
         },
     },
 };
-use core::{fmt::Display, mem::{ManuallyDrop, MaybeUninit}};
+
+#[allow(unused)]
+use crate::utils::{enable_debug_privilege, DebugPrivilegeGuard};
+
+use core::{
+    fmt::Display,
+    mem::{ManuallyDrop, MaybeUninit},
+};
 
 #[derive(Debug)]
 pub struct Process(Handle);
 
 impl Display for Process {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Process({:#X})", self.0)
+        if self.0 == CURRENT_PROCESS_HANDLE {
+            write!(f, "Process(Current)")
+        } else {
+            write!(f, "Process({:#X})", self.0)
+        }
     }
 }
 
 impl Process {
+    const CURRENT: Self = Self(CURRENT_PROCESS_HANDLE);
+
     /// Creates a [`Process`] struct using
     /// current process pseudo handle (`-1`)
+    #[inline(always)]
     pub fn current() -> Self {
-        Self(CURRENT_PROCESS_HANDLE)
+        Self::CURRENT
     }
 
     /// Opens the process with the `pid` with `access`
@@ -228,20 +245,20 @@ impl Process {
         self.0
     }
 
-	/// Consumes the [`Process`] and returns the underlying handle without closing it.
-	#[inline(always)]
-	pub fn into_handle(self) -> Handle {
-		let process = ManuallyDrop::new(self);
-		process.0
-	}
+    /// Consumes the [`Process`] and returns the underlying handle without closing it.
+    #[inline(always)]
+    pub fn into_handle(self) -> Handle {
+        let process = ManuallyDrop::new(self);
+        process.0
+    }
 
-	/// Consumes the [`Process`] and returns the a [`SafeHandle`] containing
-	/// the underlying process handle.
-	#[inline(always)]
-	pub fn into_safe_handle(self) -> SafeHandle {
-		let process = ManuallyDrop::new(self);
-		SafeHandle::from(process.0)
-	}
+    /// Consumes the [`Process`] and returns the a [`SafeHandle`] containing
+    /// the underlying process handle.
+    #[inline(always)]
+    pub fn into_safe_handle(self) -> SafeHandle {
+        let process = ManuallyDrop::new(self);
+        SafeHandle::from(process.0)
+    }
 
     /// Queries the handles that the process has open.
     ///
@@ -1032,6 +1049,61 @@ impl Process {
         range: AddressRange,
     ) -> MemoryRegionIter<'process> {
         MemoryRegionIter::new(self, range)
+    }
+
+    /// Sets the instrumentation callback for the process.
+    ///
+    /// The instrumentation callback is executed on kernel-to-user-mode returns,
+    /// such as syscalls.
+    ///
+    /// # Access Rights
+    ///
+    /// If this is a remote process,
+    /// this method requires the process handle access mask to include:
+    ///
+    /// - [`ProcessAccess::SET_INFORMATION`]
+    ///
+    /// # Privileges
+    ///
+    /// Setting instrumentation callbacks on remote processes requires the
+    /// debug privilege to be enabled (see [`DebugPrivilegeGuard`] or [`enable_debug_privilege`]).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ProcessError::NtStatus`] if setting the instrumentation
+    /// callback fails.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// unsafe extern "system" fn my_callback(original_rsp: u64, return_address: u64, return_value: u64) {
+    ///     // handle callback
+    /// }
+    ///
+    /// let process = Process::current();
+    /// process.set_instrumentation_callback(my_callback)?;
+    /// ```
+    pub fn set_instrumentation_callback(
+        &self,
+        callback: ProcessInstrumentationCallback,
+    ) -> Result<()> {
+        let mut callback_info = ProcessInstrumentationCallbackInfo {
+            version: 0,
+            reserved: 0,
+            callback: callback as _,
+        };
+
+        let status = nt_set_information_process(
+            self.0,
+            0x28, // ProcessInstrumentationCallback
+            (&mut callback_info as *mut ProcessInstrumentationCallbackInfo) as _,
+            size_of::<ProcessInstrumentationCallbackInfo>() as u32,
+        );
+
+        match status {
+            0 => Ok(()),
+            _ => Err(ProcessError::NtStatus(status)),
+        }
     }
 
     pub(crate) fn read_unicode_string(&self, unicode_string: &UnicodeString) -> Result<String> {

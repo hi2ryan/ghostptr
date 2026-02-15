@@ -1,4 +1,4 @@
-use crate::windows::{structs::{PsAttributeList, ThreadContext}};
+use crate::windows::structs::{PsAttributeList, ThreadContext, TokenPrivileges};
 
 use super::{
     Handle, NtStatus,
@@ -60,6 +60,37 @@ pub fn nt_terminate_process(process_handle: Handle, exit_status: NtStatus) -> Nt
             clobber_abi("system"),
         );
     }
+
+    status
+}
+
+/// NtSetInformationProcess
+#[inline(always)]
+pub fn nt_set_information_process(
+    process_handle: Handle,
+    process_info_class: u32,
+	process_info: *mut c_void,
+	info_len: u32,
+) -> NtStatus {
+    let status: NtStatus;
+    let id = syscalls().nt_set_information_process;
+
+    unsafe {
+        asm!(
+            "mov r10, rcx",
+            "syscall",
+
+            in("rcx") process_handle,
+            in("rdx") process_info_class,
+			in("r8") process_info,
+			in("r9") info_len,
+
+            in("rax") id,
+            lateout("rax") status,
+
+            clobber_abi("system"),
+        )
+    };
 
     status
 }
@@ -506,6 +537,37 @@ pub fn nt_set_context_thread(
     status
 }
 
+/// NtSetInformationThread
+#[inline(always)]
+pub fn nt_set_information_thread(
+    thread_handle: Handle,
+    thread_info_class: u32,
+	thread_info: *mut c_void,
+	info_len: u32,
+) -> NtStatus {
+    let status: NtStatus;
+    let id = syscalls().nt_set_information_thread;
+
+    unsafe {
+        asm!(
+            "mov r10, rcx",
+            "syscall",
+
+            in("rcx") thread_handle,
+            in("rdx") thread_info_class,
+			in("r8") thread_info,
+			in("r9") info_len,
+
+            in("rax") id,
+            lateout("rax") status,
+
+            clobber_abi("system"),
+        )
+    };
+
+    status
+}
+
 /// NtQuerySystemInformation
 #[inline(always)]
 pub fn nt_query_system_information(
@@ -718,6 +780,70 @@ pub fn nt_query_information_thread(
     status
 }
 
+/// NtOpenProcessToken
+#[inline(always)]
+pub fn nt_open_process_token(process_handle: Handle, desired_access: u32, token_handle: *mut Handle) -> NtStatus {
+    let status: NtStatus;
+    let id = syscalls().nt_open_process_token;
+
+    unsafe {
+        asm!(
+            "mov r10, rcx",
+            "syscall",
+
+            in("rcx") process_handle,
+			in("rdx") desired_access,
+			in("r8") token_handle,
+
+            in("rax") id,
+            lateout("rax") status,
+
+            clobber_abi("system"),
+        );
+    }
+
+    status
+}
+
+/// NtAdjustPrivilegeToken
+#[inline(always)]
+pub fn nt_adjust_privileges_token(
+	token_handle: Handle,
+	disable_all_privileges: u32,
+	new_state: *mut TokenPrivileges,
+	buffer_length: u32,
+	previous_state: *mut TokenPrivileges,
+	return_length: *mut u32,
+) -> NtStatus {
+    let status: NtStatus;
+    let id = syscalls().nt_adjust_privileges_token;
+
+    unsafe {
+        asm!(
+            "sub rsp, 0x38",
+            "mov [rsp + 0x28], {previous_state}",
+			"mov [rsp + 0x30], {return_length}",
+            "mov r10, rcx",
+            "syscall",
+            "add rsp, 0x38",
+
+            in("rcx") token_handle,
+			in("rdx") disable_all_privileges,
+			in("r8") new_state,
+			in("r9") buffer_length,
+			previous_state = in(reg) previous_state,
+			return_length = in(reg) return_length,
+
+            in("rax") id,
+            lateout("rax") status,
+
+            clobber_abi("system"),
+        );
+    }
+
+    status
+}
+
 /// NtClose
 #[inline(always)]
 pub fn nt_close(handle: Handle) -> NtStatus {
@@ -726,12 +852,14 @@ pub fn nt_close(handle: Handle) -> NtStatus {
 
     unsafe {
         asm!(
-            "mov r10, rcx",			// syscall prep
+            "mov r10, rcx",
             "syscall",
 
-            in("rax") id,			// syscall id
-            in("rcx") handle,		// arg1
-            lateout("rax") status,	// ntstatus
+            in("rcx") handle,
+
+            in("rax") id,
+            lateout("rax") status,
+
             clobber_abi("system"),
         );
     }

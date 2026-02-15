@@ -46,5 +46,8 @@ pub use process::{
     ExecutionTimes, MemScanIter, MemoryAllocation, MemoryRegionInfo, MemoryRegionIter, Process,
     ProcessHandleInfo, Thread,
 };
-pub use utils::{AddressRange, AsPointer, HandleObject, SafeHandle, close_handle};
+pub use utils::{
+    AddressRange, AsPointer, DebugPrivilegeGuard, HandleObject, SafeHandle, close_handle,
+    disable_debug_privilege, enable_debug_privilege,
+};
 pub use windows::{Handle, NtStatus, flags::*};
