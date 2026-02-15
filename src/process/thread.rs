@@ -1,21 +1,31 @@
 use crate::{
     ProcessError, Result,
     process::{ThreadAccess, ThreadContextFlags, utils::ExecutionTimes},
-	utils::SafeHandle,
+    utils::SafeHandle,
     windows::{
         Handle, NtStatus,
-        constants::CURRENT_THREAD_HANDLE,
+        constants::{
+            CURRENT_THREAD_HANDLE, STATUS_BUFFER_OVERFLOW, STATUS_BUFFER_TOO_SMALL,
+            STATUS_INFO_LENGTH_MISMATCH,
+        },
         structs::{
             ClientId, KernelUserTimes, ObjectAttributes, ThreadBasicInformation, ThreadContext,
+            UnicodeString,
         },
+        utils::unicode_to_string,
         wrappers::{
             nt_close, nt_duplicate_object, nt_get_context_thread, nt_open_thread,
             nt_query_information_thread, nt_resume_thread, nt_set_context_thread,
-            nt_suspend_thread, nt_terminate_thread, nt_wait_for_single_object,
+            nt_set_information_thread, nt_suspend_thread, nt_terminate_thread,
+            nt_wait_for_single_object,
         },
     },
 };
-use core::{mem::{ManuallyDrop, MaybeUninit}, ptr, time::Duration};
+use core::{
+    mem::{ManuallyDrop, MaybeUninit},
+    ptr,
+    time::Duration,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WaitResult {
@@ -27,9 +37,12 @@ pub enum WaitResult {
 pub struct Thread(Handle);
 
 impl Thread {
+    const CURRENT: Self = Self(CURRENT_THREAD_HANDLE);
+
     /// Opens the currently running thread, using a pseudo handle (`-2`).
+    #[inline(always)]
     pub fn current() -> Self {
-        Self(CURRENT_THREAD_HANDLE)
+        Self::CURRENT
     }
 
     /// Creates a `Thread` struct based on an already
@@ -44,7 +57,7 @@ impl Thread {
         Self(handle)
     }
 
-	/// Returns the underlying process handle.
+    /// Returns the underlying process handle.
     ///
     /// # Safety
     /// The handle will be closed as the [`Thread`] is dropped.
@@ -52,27 +65,27 @@ impl Thread {
         self.0
     }
 
-	/// Consumes the [`Thread`] and returns the underlying handle without closing it.
-	#[inline(always)]
-	pub fn into_handle(self) -> Handle {
-		let thread = ManuallyDrop::new(self);
-		thread.0
-	}
+    /// Consumes the [`Thread`] and returns the underlying handle without closing it.
+    #[inline(always)]
+    pub fn into_handle(self) -> Handle {
+        let thread = ManuallyDrop::new(self);
+        thread.0
+    }
 
-	/// Consumes the [`Thread`] and returns the a [`SafeHandle`] containing
-	/// the underlying thread handle.
-	#[inline(always)]
-	pub fn into_safe_handle(self) -> SafeHandle {
-		let thread = ManuallyDrop::new(self);
-		SafeHandle::from(thread.0)
-	}
+    /// Consumes the [`Thread`] and returns the a [`SafeHandle`] containing
+    /// the underlying thread handle.
+    #[inline(always)]
+    pub fn into_safe_handle(self) -> SafeHandle {
+        let thread = ManuallyDrop::new(self);
+        SafeHandle::from(thread.0)
+    }
 
     /// Opens an existing thread.
     ///
     /// # Errors
     ///
     /// Returns [`ProcessError::NtStatus`] if the thread identifier
-	/// or access mask is invalid.
+    /// or access mask is invalid.
     pub fn open(tid: u32, access: ThreadAccess) -> Result<Self> {
         let mut client_id = ClientId {
             unique_process: 0,
@@ -477,6 +490,95 @@ impl Thread {
         }
     }
 
+    /// Retrieves the description (name) assigned to the thread.
+    ///
+    /// # Access Rights
+    ///
+    /// This method requires the thread handle access mask to include:
+    ///
+    /// - [`ThreadAccess::QUERY_INFORMATION`], **or**
+    /// - [`ThreadAccess::QUERY_LIMITED_INFORMATION`]
+    ///
+    /// Without this right, the system call will fail with an `NTSTATUS` error.
+    ///
+    /// # Returns
+    ///
+    /// Returns [`ProcessError::NtStatus`] if it fails to query the thread's
+    /// description, potentially due to insufficient access rights.
+    pub fn description(&self) -> Result<String> {
+		// initially retrieve length
+        let mut len = 0;
+        nt_query_information_thread(
+            self.0,
+            0x26, // ThreadNameInformation
+            ptr::null_mut(),
+            len,
+            &mut len,
+        );
+
+        let mut buf = vec![0u8; len as usize];
+        loop {
+            let status = nt_query_information_thread(
+                self.0,
+                0x26, // ThreadNameInformation
+                buf.as_mut_ptr().cast(),
+                len,
+                &mut len,
+            );
+
+            match status {
+                0 => {
+                    // Safety:
+                    // the NtQueryInformationThread syscall returned STATUS_SUCCESS
+                    // and therefore filled the buffer
+                    let unicode_name = unsafe { &*(buf.as_ptr() as *const UnicodeString) };
+                    return Ok(unicode_to_string(unicode_name));
+                }
+                STATUS_INFO_LENGTH_MISMATCH | STATUS_BUFFER_TOO_SMALL | STATUS_BUFFER_OVERFLOW => {
+                    buf.resize(len as usize, 0);
+                    continue;
+                }
+                _ => return Err(ProcessError::NtStatus(status)),
+            }
+        }
+    }
+
+    /// Assigns a description (name) to a thread.
+    ///
+    /// # Access Rights
+    ///
+    /// This method requires the thread handle access mask to include:
+    ///
+    /// - [`ThreadAccess::SET_INFORMATION`]
+    ///
+    /// Without this right, the system call will fail with an `NTSTATUS` error.
+    ///
+    /// # Returns
+    ///
+    /// Returns [`ProcessError::NtStatus`] if it fails to set the thread's
+    /// description, potentially due to insufficient access rights.
+    pub fn set_description(&self, description: &str) -> Result<()> {
+        let buf = description.encode_utf16().collect::<Vec<_>>();
+        let length = (buf.len() * 2) as u16;
+        let name = UnicodeString {
+            length,
+            max_length: length,
+            buffer: buf.as_ptr(),
+        };
+
+        let status = nt_set_information_thread(
+            self.0,
+            0x26,
+            (&name as *const UnicodeString) as _,
+            size_of::<UnicodeString>() as u32,
+        );
+
+        match status {
+            0 => Ok(()),
+            _ => Err(ProcessError::NtStatus(status)),
+        }
+    }
+
     pub(crate) fn query_info(&self) -> Result<ThreadBasicInformation> {
         let mut info = MaybeUninit::<ThreadBasicInformation>::uninit();
         let status = nt_query_information_thread(
@@ -496,6 +598,11 @@ impl Thread {
 
 impl Drop for Thread {
     fn drop(&mut self) {
+        if self.0 == CURRENT_THREAD_HANDLE {
+            // handle is a pseudo handle
+            return;
+        }
+
         // cleanup: close thread handle
         nt_close(self.0);
     }
@@ -503,10 +610,7 @@ impl Drop for Thread {
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        Process, ProcessAccess, Result, ThreadContextFlags,
-        iter::process::ProcessIterator, process::ThreadAccess,
-    };
+    use crate::*;
 
     #[test]
     fn query_thread_info() -> Result<()> {
@@ -532,10 +636,8 @@ mod tests {
 
     #[test]
     fn suspend_resume_thread() -> Result<()> {
-        let process = Process::open_first_named(
-            "Discord.exe",
-            ProcessAccess::QUERY_LIMITED_INFORMATION,
-        )?;
+        let process =
+            Process::open_first_named("Discord.exe", ProcessAccess::QUERY_LIMITED_INFORMATION)?;
 
         let threads = process.threads()?;
         let thread = threads[0]
@@ -552,10 +654,8 @@ mod tests {
 
     #[test]
     fn thread_context() -> Result<()> {
-        let process = Process::open_first_named(
-            "Discord.exe",
-            ProcessAccess::QUERY_LIMITED_INFORMATION,
-        )?;
+        let process =
+            Process::open_first_named("Discord.exe", ProcessAccess::QUERY_LIMITED_INFORMATION)?;
 
         let threads = process.threads()?;
         let thread = threads[0].open(ThreadAccess::GET_CONTEXT)?;
@@ -573,6 +673,30 @@ mod tests {
             ctx.rcx, 0,
             "failed to get thread context: invalid rcx (flags: CONTROL)"
         );
+
+        Ok(())
+    }
+
+    #[test]
+    fn thread_description() -> Result<()> {
+        const TEST_DESCRIPTION: &str = "test description";
+        let thread = Thread::current();
+
+        let orig_description = thread.description()?;
+        assert_eq!(
+            orig_description, "process::thread::tests::thread_description",
+            "thread description mismatched"
+        );
+
+        thread.set_description(TEST_DESCRIPTION)?;
+        let new_description = thread.description()?;
+
+        assert_eq!(
+            new_description, TEST_DESCRIPTION,
+            "applied thread description mismatched"
+        );
+
+        thread.set_description(&orig_description)?;
 
         Ok(())
     }

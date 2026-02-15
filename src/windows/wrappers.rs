@@ -542,7 +542,7 @@ pub fn nt_set_context_thread(
 pub fn nt_set_information_thread(
     thread_handle: Handle,
     thread_info_class: u32,
-	thread_info: *mut c_void,
+	thread_info: *const c_void,
 	info_len: u32,
 ) -> NtStatus {
     let status: NtStatus;
