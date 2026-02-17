@@ -440,7 +440,7 @@ pub struct MemoryBasicInformation {
     pub region_size: usize,
     pub state: u32,
     pub protection: u32,
-    pub r#type: u32,
+    pub mem_type: u32,
 }
 
 #[repr(C)]
@@ -516,7 +516,7 @@ pub struct ContextXmmLayout {
 
 #[repr(C)]
 #[derive(Clone, Copy)]
-pub union ContextUnion {
+pub union ContextXmmState {
     pub flt_save: XSaveFormat,
     pub xmm: ContextXmmLayout,
 }
@@ -562,7 +562,7 @@ pub struct ThreadContext {
     pub r14: u64,
     pub r15: u64,
     pub rip: u64,
-    pub u: ContextUnion,
+    pub xmm_state: ContextXmmState,
     pub vector_register: [M128A; 26],
     pub vector_control: u64,
     pub debug_control: u64,
@@ -659,9 +659,9 @@ pub struct SystemHandleInformationEx {
 
 #[repr(C)]
 pub struct ProcessInstrumentationCallbackInfo {
-	pub version: u32,
-	pub reserved: u32,
-	pub callback: *mut c_void,
+    pub version: u32,
+    pub reserved: u32,
+    pub callback: *mut c_void,
 }
 
 #[repr(C)]
@@ -680,4 +680,46 @@ pub struct LuidAndAttributes {
 pub struct Luid {
     pub low_part: u32,
     pub high_part: i32,
+}
+
+#[repr(C)]
+pub struct SRWLock {
+    pub value: usize,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct RtlVectorHandlerList {
+    pub veh_lock: *const SRWLock,
+    pub veh_list: ListEntry,
+
+    pub vch_lock: *const SRWLock,
+    pub vch_list: ListEntry,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct RtlVectorHandlerEntry {
+    pub list: ListEntry,
+    pub ref_count: *mut u64,
+    pub zero: u32,
+    pub padding: u32,
+    pub encoded_handler: *mut c_void,
+}
+
+#[repr(C)]
+pub struct ExceptionPointers {
+    pub exception_record: *mut ExceptionRecord,
+    pub context_record: *mut ThreadContext,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct ExceptionRecord {
+    pub exception_code: NtStatus,
+    pub exception_flags: u32,
+    pub exception_record: *mut ExceptionRecord,
+    pub exception_address: *mut core::ffi::c_void,
+    pub number_parameters: u32,
+    pub exception_information: [usize; 15],
 }

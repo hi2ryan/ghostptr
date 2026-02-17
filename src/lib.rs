@@ -27,27 +27,44 @@ pub mod patterns;
 pub mod process;
 pub mod utils;
 
+#[cfg(feature = "vectored_handlers")]
+pub mod vectored_handlers;
+
 #[cfg(feature = "rtti")]
 pub mod rtti;
 
 #[cfg(feature = "rtti")]
 pub use rtti::{ModuleRTTIExt, RTTIObject};
 
-/* EXPORTS */
-
 pub use error::{ProcessError, Result};
 pub use iter::{
-    ModuleIterOrder, ModuleIterator, ProcessIterator, ProcessView, SystemModuleIterator,
-    SystemModuleView, ThreadView,
+    ModuleIterOrder, ModuleIterator, ProcessIterator, ProcessView,
+    SystemModuleIterator, SystemModuleView, ThreadView,
 };
 pub use modules::{Export, Import, ImportType, Module, Section};
 pub use patterns::{Pattern16, Pattern32, Scanner};
 pub use process::{
-    ExecutionTimes, MemScanIter, MemoryAllocation, MemoryRegionInfo, MemoryRegionIter, Process,
-    ProcessHandleInfo, Thread,
+    ExecutionTimes, MemScanIter, MemoryAllocation, MemoryRegionInfo,
+    MemoryRegionIter, Process, ProcessHandleInfo, Thread,
 };
 pub use utils::{
-    AddressRange, AsPointer, DebugPrivilegeGuard, HandleObject, SafeHandle, close_handle,
-    disable_debug_privilege, enable_debug_privilege,
+    AddressRange, AsPointer, DebugPrivilegeGuard, HandleObject,
+    SafeHandle, close_handle, disable_debug_privilege,
+    enable_debug_privilege,
 };
-pub use windows::{Handle, NtStatus, flags::*};
+
+pub use windows::{
+    DllEntryPoint, Handle, NtStatus, ProcessInstrumentationCallback,
+    flags::*,
+};
+
+#[cfg(feature = "vectored_handlers")]
+pub use vectored_handlers::{
+    VectoredHandlerEntry, VectoredHandlerIterator, VectoredHandlerList,
+    VectoredHandlerType,
+};
+
+#[cfg(feature = "vectored_handlers")]
+pub use windows::{
+    ExceptionHandler, ExceptionPointers, VectoredExceptionHandler,
+};

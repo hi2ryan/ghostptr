@@ -43,7 +43,10 @@ macro_rules! impl_bitflags {
         }
 
         impl core::fmt::Debug for $ty {
-            fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+            fn fmt(
+                &self,
+                f: &mut core::fmt::Formatter<'_>,
+            ) -> core::fmt::Result {
                 write!(f, "{}(0x{:X})", stringify!($ty), self.0)
             }
         }
@@ -242,7 +245,7 @@ impl core::fmt::Display for MemoryProtection {
         let w = if self.is_writable() { 'w' } else { '-' };
         let x = if self.is_executable() { 'x' } else { '-' };
         let g = if self.is_guarded() { 'G' } else { '-' };
-		
+
         write!(f, "MemoryProtection({}{}{}{})", r, w, x, g)
     }
 }
@@ -397,7 +400,13 @@ impl ThreadContextFlags {
 
     /// The complete AMD64 context.
     /// CONTROL | INTEGER | SEGMENTS | FLOATING_POINT | DEBUG_REGISTERS
-    pub const ALL: Self = Self(0x0010_0001 | 0x0010_0002 | 0x0010_0004 | 0x0010_0008 | 0x0010_0010);
+    pub const ALL: Self = Self(
+        0x0010_0001
+            | 0x0010_0002
+            | 0x0010_0004
+            | 0x0010_0008
+            | 0x0010_0010,
+    );
 
     /// Indicates the thread is actively handling an exception.
     pub const EXCEPTION_ACTIVE: Self = Self(0x0800_0000);
@@ -550,3 +559,16 @@ impl SectionCharacteristics {
 }
 
 impl_bitflags!(SectionCharacteristics);
+
+#[repr(i32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum ExceptionHandler {
+    /// Handle the exception here and unwind.
+    ExecuteHandler = 1,
+
+    /// Skip this handler and let Windows keep searching.
+    ContinueSearch = 0,
+
+    /// Resume execution at the faulting instruction.
+    ContinueExecution = -1,
+}

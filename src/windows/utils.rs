@@ -1,9 +1,11 @@
 use super::structs::ProcessEnvBlock;
 use crate::error::{ProcessError, Result};
-use crate::windows::constants::{STATUS_BUFFER_TOO_SMALL, STATUS_INFO_LENGTH_MISMATCH};
+use crate::windows::constants::{
+    STATUS_BUFFER_TOO_SMALL, STATUS_INFO_LENGTH_MISMATCH,
+};
 use crate::windows::structs::{
-    ImageDosHeader, ImageExportDirectory, ImageNtHeaders64, LdrModule, ProcessBasicInformation,
-    UnicodeString,
+    ImageDosHeader, ImageExportDirectory, ImageNtHeaders64, LdrModule,
+    ProcessBasicInformation, UnicodeString,
 };
 use crate::windows::wrappers::nt_query_information_process;
 use core::arch::asm;
@@ -29,7 +31,8 @@ pub fn unicode_to_string(u: &UnicodeString) -> String {
         return String::new();
     }
 
-    let slice = unsafe { from_raw_parts(u.buffer, (u.length / 2) as usize) };
+    let slice =
+        unsafe { from_raw_parts(u.buffer, (u.length / 2) as usize) };
     String::from_utf16_lossy(slice)
 }
 
@@ -47,8 +50,10 @@ pub fn get_module_base(name: &str) -> Option<*const u8> {
 
         while current != head {
             let entry = (current as usize
-                - core::mem::offset_of!(LdrModule, in_memory_order_module_list))
-                as *const LdrModule;
+                - core::mem::offset_of!(
+                    LdrModule,
+                    in_memory_order_module_list
+                )) as *const LdrModule;
             let dll_name = unicode_to_string(&(*entry).base_dll_name);
 
             if dll_name.eq_ignore_ascii_case(name) {
@@ -69,12 +74,15 @@ pub fn get_export(base: *const u8, name: &str) -> Option<*const u8> {
             .add((*dos_header).e_lfanew as usize)
             .cast::<ImageNtHeaders64>();
 
-        let export_dir_rva = (*nt_headers).optional_header.data_directory[0].virtual_address;
+        let export_dir_rva = (*nt_headers).optional_header.data_directory
+            [0]
+        .virtual_address;
         if export_dir_rva == 0 {
             return None;
         }
 
-        let export_dir = (base as usize + export_dir_rva as usize) as *mut ImageExportDirectory;
+        let export_dir = (base as usize + export_dir_rva as usize)
+            as *mut ImageExportDirectory;
         let number_of_names = (*export_dir).number_of_names;
 
         let address_of_names = base
@@ -98,7 +106,8 @@ pub fn get_export(base: *const u8, name: &str) -> Option<*const u8> {
             // 	println!("{:?}", name_bytes);
             // }
             if export_name.to_bytes() == name_bytes {
-                let ordinal_index = *address_of_name_ordinals.add(i as usize) as usize;
+                let ordinal_index =
+                    *address_of_name_ordinals.add(i as usize) as usize;
                 let func_rva = *address_of_functions.add(ordinal_index);
                 return Some(base.add(func_rva as usize));
             }
@@ -108,7 +117,9 @@ pub fn get_export(base: *const u8, name: &str) -> Option<*const u8> {
     }
 }
 
-pub fn query_process_basic_info(handle: Handle) -> Result<ProcessBasicInformation> {
+pub fn query_process_basic_info(
+    handle: Handle,
+) -> Result<ProcessBasicInformation> {
     let mut info = ProcessBasicInformation {
         exit_status: 0,
         peb_base_address: core::ptr::null_mut(),
@@ -148,7 +159,9 @@ pub fn query_process_handle_info(handle: Handle) -> Result<Vec<u8>> {
         );
 
         match status {
-            s if s == STATUS_BUFFER_TOO_SMALL || s == STATUS_INFO_LENGTH_MISMATCH => {
+            s if s == STATUS_BUFFER_TOO_SMALL
+                || s == STATUS_INFO_LENGTH_MISMATCH =>
+            {
                 // mismatched length; retry with new length
                 continue;
             }

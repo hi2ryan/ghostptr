@@ -3,14 +3,22 @@ pub mod scan;
 pub mod thread;
 pub mod utils;
 
-use crate::windows::{
-    ProcessInstrumentationCallback, flags::*, structs::ProcessInstrumentationCallbackInfo,
-    wrappers::nt_set_information_process,
+#[cfg(feature = "vectored_handlers")]
+use crate::vectored_handlers::VectoredHandlerList;
+
+use crate::{
+    windows::{
+        ProcessInstrumentationCallback, flags::*,
+        structs::ProcessInstrumentationCallbackInfo,
+        wrappers::nt_set_information_process,
+    },
 };
 pub use region::MemoryRegionIter;
 pub use scan::MemScanIter;
 pub use thread::Thread;
-pub use utils::{ExecutionTimes, MemoryAllocation, MemoryRegionInfo, ProcessHandleInfo};
+pub use utils::{
+    ExecutionTimes, MemoryAllocation, MemoryRegionInfo, ProcessHandleInfo,
+};
 
 use crate::{
     error::{ProcessError, Result},
@@ -22,25 +30,28 @@ use crate::{
         Handle, NtStatus,
         constants::CURRENT_PROCESS_HANDLE,
         structs::{
-            ClientId, KernelUserTimes, MemoryBasicInformation, ObjectAttributes,
-            ProcessHandleSnapshotInformation, UnicodeString,
+            ClientId, KernelUserTimes, MemoryBasicInformation,
+            ObjectAttributes, ProcessHandleSnapshotInformation,
+            UnicodeString,
         },
         utils::{query_process_basic_info, query_process_handle_info},
         wrappers::{
-            nt_allocate_virtual_memory, nt_close, nt_create_thread_ex, nt_duplicate_object,
-            nt_free_virtual_memory, nt_open_process, nt_protect_virtual_memory,
-            nt_query_information_process, nt_query_virtual_memory, nt_read_virtual_memory,
+            nt_allocate_virtual_memory, nt_close, nt_create_thread_ex,
+            nt_duplicate_object, nt_free_virtual_memory, nt_open_process,
+            nt_protect_virtual_memory, nt_query_information_process,
+            nt_query_virtual_memory, nt_read_virtual_memory,
             nt_terminate_process, nt_write_virtual_memory,
         },
     },
 };
 
 #[allow(unused)]
-use crate::utils::{enable_debug_privilege, DebugPrivilegeGuard};
+use crate::utils::{DebugPrivilegeGuard, enable_debug_privilege};
 
 use core::{
     fmt::Display,
     mem::{ManuallyDrop, MaybeUninit},
+    ptr,
 };
 
 #[derive(Debug)]
@@ -80,16 +91,21 @@ impl Process {
         };
 
         let mut attributes = ObjectAttributes {
-            length: core::mem::size_of::<ObjectAttributes>() as u32,
+            length: size_of::<ObjectAttributes>() as u32,
             root_directory: 0,
-            object_name: core::ptr::null_mut(),
+            object_name: ptr::null_mut(),
             attributes: 0,
-            security_descriptor: core::ptr::null_mut(),
-            security_quality_of_service: core::ptr::null_mut(),
+            security_descriptor: ptr::null_mut(),
+            security_quality_of_service: ptr::null_mut(),
         };
 
         let mut handle = 0;
-        let status = nt_open_process(&mut handle, access.bits(), &mut attributes, &mut client_id);
+        let status = nt_open_process(
+            &mut handle,
+            access.bits(),
+            &mut attributes,
+            &mut client_id,
+        );
 
         match status {
             0 => Ok(Self(handle)),
@@ -98,7 +114,10 @@ impl Process {
     }
 
     /// Opens the first process found matching the `name` with `access`
-    pub fn open_first_named(name: &str, access: ProcessAccess) -> Result<Self> {
+    pub fn open_first_named(
+        name: &str,
+        access: ProcessAccess,
+    ) -> Result<Self> {
         let process = ProcessIterator::find_first_named(name)?;
         Self::open(process.pid, access)
     }
@@ -169,7 +188,8 @@ impl Process {
         let params_ptr: usize = self.read_mem(peb_ptr as usize + 0x20)?;
 
         // RTL_USER_PROCESS_PARAMETERS->ImagePathName
-        let image_path: UnicodeString = self.read_mem(params_ptr + 0x60)?;
+        let image_path: UnicodeString =
+            self.read_mem(params_ptr + 0x60)?;
 
         self.read_unicode_string(&image_path)
     }
@@ -276,10 +296,13 @@ impl Process {
     ///
     /// Returns [`ProcessError::NtStatus`] if querying handle information fails,
     /// potentially due to insufficient access rights.
-    pub fn handles<'process>(&'process self) -> Result<Vec<ProcessHandleInfo<'process>>> {
+    pub fn handles<'process>(
+        &'process self,
+    ) -> Result<Vec<ProcessHandleInfo<'process>>> {
         let buf = query_process_handle_info(self.0)?;
         unsafe {
-            let snapshot = buf.as_ptr() as *const ProcessHandleSnapshotInformation;
+            let snapshot =
+                buf.as_ptr() as *const ProcessHandleSnapshotInformation;
             let count = (*snapshot).handle_count as usize;
             let entries_ptr = (*snapshot).handles.as_ptr();
             let entries = core::slice::from_raw_parts(entries_ptr, count);
@@ -304,7 +327,7 @@ impl Process {
     ///
     /// # Errors
     ///
-    /// Returns [`crate::ProcessError::NtStatus`] if terminating the process fails,
+    /// Returns [`ProcessError::NtStatus`] if terminating the process fails,
     /// potentially due to insufficient access rights.
     pub fn terminate(&self, exit_status: NtStatus) -> Result<()> {
         let status = nt_terminate_process(self.0, exit_status);
@@ -328,7 +351,7 @@ impl Process {
     ///
     /// # Returns
     ///
-    /// Returns [`crate::ProcessError::NtStatus`] if it fails to query the process's
+    /// Returns [`ProcessError::NtStatus`] if it fails to query the process's
     /// times, potentially due to insufficient access rights.
     pub fn times(&self) -> Result<ExecutionTimes> {
         let mut times = MaybeUninit::<KernelUserTimes>::uninit();
@@ -337,7 +360,7 @@ impl Process {
             0x4, // ProcessTimes
             times.as_mut_ptr().cast(),
             size_of::<KernelUserTimes>() as u32,
-            core::ptr::null_mut(),
+            ptr::null_mut(),
         );
 
         match status {
@@ -364,11 +387,13 @@ impl Process {
     ///
     /// # Errors
     ///
-    /// Returns [`crate::ProcessError::NtStatus`] if creating the thread fails,
+    /// Returns [`ProcessError::NtStatus`] if creating the thread fails,
     /// potentially due to insufficient access rights.
     pub fn threads(&self) -> Result<Vec<ThreadView>> {
         let pid = self.pid()?;
-        let Some(process) = ProcessIterator::new()?.find(|view| view.pid == pid) else {
+        let Some(process) =
+            ProcessIterator::new()?.find(|view| view.pid == pid)
+        else {
             return Err(ProcessError::ProcessNotFound(pid.to_string()));
         };
 
@@ -389,7 +414,7 @@ impl Process {
     ///
     /// # Errors
     ///
-    /// Returns [`crate::ProcessError::NtStatus`] if creating the thread fails,
+    /// Returns [`ProcessError::NtStatus`] if creating the thread fails,
     /// potentially due to insufficient access rights.
     pub fn create_thread(
         &self,
@@ -403,7 +428,7 @@ impl Process {
         let status = nt_create_thread_ex(
             &mut handle,
             access.bits(),
-            core::ptr::null_mut(),
+            ptr::null_mut(),
             self.0,
             start_routine,
             argument,
@@ -411,7 +436,7 @@ impl Process {
             0,
             0,
             0,
-            core::ptr::null_mut(),
+            ptr::null_mut(),
         );
 
         if status == 0 {
@@ -438,10 +463,12 @@ impl Process {
     ///
     /// # Errors
     ///
-    /// Returns [`crate::ProcessError::NtStatus`] if the module enumeration fails,
+    /// Returns [`ProcessError::NtStatus`] if the module enumeration fails,
     /// potentially due to insufficient access rights.
     #[inline(always)]
-    pub fn main_module<'process>(&'process self) -> Result<Module<'process>> {
+    pub fn main_module<'process>(
+        &'process self,
+    ) -> Result<Module<'process>> {
         self.modules(ModuleIterOrder::Load)?
             .next()
             .ok_or(ProcessError::MainModuleNotFound)
@@ -464,10 +491,13 @@ impl Process {
     ///
     /// # Errors
     ///
-    /// Returns [`crate::ProcessError::NtStatus`] if the module enumeration fails,
+    /// Returns [`ProcessError::NtStatus`] if the module enumeration fails,
     /// potentially due to insufficient access rights.
     #[inline(always)]
-    pub fn get_module<'process>(&'process self, name: &str) -> Result<Module<'process>> {
+    pub fn get_module<'process>(
+        &'process self,
+        name: &str,
+    ) -> Result<Module<'process>> {
         self.modules(ModuleIterOrder::Load)?
             .find(|m| m.name.eq_ignore_ascii_case(name))
             .ok_or(ProcessError::ModuleNotFound(name.to_string()))
@@ -489,7 +519,7 @@ impl Process {
     ///
     /// # Errors
     ///
-    /// Returns [`crate::ProcessError::NtStatus`] if the module enumeration fails,
+    /// Returns [`ProcessError::NtStatus`] if the module enumeration fails,
     /// potentially due to insufficient access rights.
     #[inline(always)]
     pub fn modules<'process>(
@@ -517,7 +547,7 @@ impl Process {
     ///
     /// # Errors
     ///
-    /// Returns [`crate::ProcessError::NtStatus`] if reading the memory fails,
+    /// Returns [`ProcessError::NtStatus`] if reading the memory fails,
     /// potentially due to insufficient access rights.
     ///
     /// # Example
@@ -526,7 +556,10 @@ impl Process {
     /// let value: u32 = process.read_mem(0x7FF6_1234_5678)?;
     /// println!("value: {}", value);
     /// ```
-    pub fn read_mem<T: Copy>(&self, address: impl AsPointer<T>) -> Result<T> {
+    pub fn read_mem<T: Copy>(
+        &self,
+        address: impl AsPointer<T>,
+    ) -> Result<T> {
         let mut value = MaybeUninit::<T>::uninit();
         let mut bytes_read = 0;
         let bytes_to_read = size_of::<T>();
@@ -567,9 +600,13 @@ impl Process {
     ///
     /// # Errors
     ///
-    /// Returns [`crate::ProcessError::NtStatus`] if reading the memory fails,
+    /// Returns [`ProcessError::NtStatus`] if reading the memory fails,
     /// potentially due to insufficient access rights.
-    pub fn read_slice<T: Copy>(&self, address: impl AsPointer<T>, len: usize) -> Result<Vec<T>> {
+    pub fn read_slice<T: Copy>(
+        &self,
+        address: impl AsPointer<T>,
+        len: usize,
+    ) -> Result<Vec<T>> {
         if len == 0 {
             return Ok(Vec::new());
         }
@@ -663,7 +700,7 @@ impl Process {
     ///
     /// # Errors
     ///
-    /// Returns [`crate::ProcessError::NtStatus`] if reading the memory fails,
+    /// Returns [`ProcessError::NtStatus`] if reading the memory fails,
     /// potentially due to insufficient access rights.
     ///
     /// # Safety
@@ -671,7 +708,11 @@ impl Process {
     /// The caller must ensure that the memory read is a proper c string
     /// with a null terminator. This method will continue reading memory
     /// until it finds a null terminator.
-    pub fn read_c_string(&self, address: impl AsPointer<u8>, len: Option<usize>) -> Result<String> {
+    pub fn read_c_string(
+        &self,
+        address: impl AsPointer<u8>,
+        len: Option<usize>,
+    ) -> Result<String> {
         let max_len;
         let mut buffer;
         if let Some(len) = len {
@@ -753,9 +794,13 @@ impl Process {
     ///
     /// # Errors
     ///
-    /// Returns [`crate::ProcessError::NtStatus`] if writing the memory fails,
+    /// Returns [`ProcessError::NtStatus`] if writing the memory fails,
     /// potentially due to insufficient access rights.
-    pub fn write_mem<T>(&self, address: impl AsPointer<T>, value: &T) -> Result<()> {
+    pub fn write_mem<T>(
+        &self,
+        address: impl AsPointer<T>,
+        value: &T,
+    ) -> Result<()> {
         let mut bytes_written = 0;
         let bytes_to_write = size_of::<T>();
 
@@ -795,9 +840,13 @@ impl Process {
     ///
     /// # Errors
     ///
-    /// Returns [`crate::ProcessError::NtStatus`] if writing the memory fails,
+    /// Returns [`ProcessError::NtStatus`] if writing the memory fails,
     /// potentially due to insufficient access rights.
-    pub fn write_slice<T>(&self, address: impl AsPointer<T>, value: &[T]) -> Result<()> {
+    pub fn write_slice<T>(
+        &self,
+        address: impl AsPointer<T>,
+        value: &[T],
+    ) -> Result<()> {
         let mut bytes_written = 0;
         let bytes_to_write = size_of_val(value);
 
@@ -837,10 +886,14 @@ impl Process {
     ///
     /// # Errors
     ///
-    /// Returns [`crate::ProcessError::NtStatus`] if querying the memory fails,
+    /// Returns [`ProcessError::NtStatus`] if querying the memory fails,
     /// potentially due to insufficient access rights.
-    pub fn query_mem(&self, address: impl AsPointer) -> Result<MemoryRegionInfo> {
-        let mut memory_info: MaybeUninit<MemoryBasicInformation> = MaybeUninit::uninit();
+    pub fn query_mem(
+        &self,
+        address: impl AsPointer,
+    ) -> Result<MemoryRegionInfo> {
+        let mut memory_info: MaybeUninit<MemoryBasicInformation> =
+            MaybeUninit::uninit();
 
         let status = nt_query_virtual_memory(
             self.0,
@@ -848,7 +901,7 @@ impl Process {
             0x0, // MemoryBasicInformation
             memory_info.as_mut_ptr().cast(),
             size_of::<MemoryBasicInformation>(),
-            core::ptr::null_mut(),
+            ptr::null_mut(),
         );
 
         if status != 0 {
@@ -877,7 +930,7 @@ impl Process {
     ///
     /// # Errors
     ///
-    /// Returns [`crate::ProcessError::NtStatus`] if protecting the memory fails,
+    /// Returns [`ProcessError::NtStatus`] if protecting the memory fails,
     /// potentially due to insufficient access rights.
     pub fn protect_mem(
         &self,
@@ -885,7 +938,8 @@ impl Process {
         size: usize,
         new_protection: MemoryProtection,
     ) -> Result<MemoryProtection> {
-        let mut base_address = address.as_ptr().cast::<core::ffi::c_void>().cast_mut();
+        let mut base_address =
+            address.as_ptr().cast::<core::ffi::c_void>().cast_mut();
         let mut region_size = size;
         let mut prev_protection = new_protection.bits();
 
@@ -922,13 +976,13 @@ impl Process {
     ///
     /// # Errors
     ///
-    /// Returns [`crate::ProcessError::NtStatus`] if allocating the memory fails,
+    /// Returns [`ProcessError::NtStatus`] if allocating the memory fails,
     /// potentially due to insufficient access rights.
     pub fn alloc_mem<'process>(
         &'process self,
         address: Option<usize>,
         size: usize,
-        r#type: AllocationType,
+        allocation_type: AllocationType,
         protection: MemoryProtection,
     ) -> Result<MemoryAllocation<'process>> {
         let mut base_address = address.unwrap_or(0usize);
@@ -939,7 +993,7 @@ impl Process {
             &mut base_address,
             0,
             &mut region_size,
-            r#type.bits(),
+            allocation_type.bits(),
             protection.bits(),
         );
 
@@ -978,19 +1032,24 @@ impl Process {
     ///
     /// # Errors
     ///
-    /// Returns [`crate::ProcessError::NtStatus`] if freeing the memory fails,
+    /// Returns [`ProcessError::NtStatus`] if freeing the memory fails,
     /// potentially due to insufficient access rights.
     pub fn free_mem(
         &self,
         address: impl AsPointer<u8>,
         size: usize,
-        r#type: FreeType,
+        free_type: FreeType,
     ) -> Result<()> {
-        let mut base_address = address.as_ptr().cast::<core::ffi::c_void>().cast_mut();
+        let mut base_address =
+            address.as_ptr().cast::<core::ffi::c_void>().cast_mut();
         let mut region_size = size;
 
-        let status =
-            nt_free_virtual_memory(self.0, &mut base_address, &mut region_size, r#type.bits());
+        let status = nt_free_virtual_memory(
+            self.0,
+            &mut base_address,
+            &mut region_size,
+            free_type.bits(),
+        );
 
         if status != 0 {
             return Err(ProcessError::NtStatus(status));
@@ -1013,7 +1072,7 @@ impl Process {
     ///
     /// # Errors
     ///
-    /// Returns [`crate::ProcessError::NtStatus`] if reading the memory fails,
+    /// Returns [`ProcessError::NtStatus`] if reading the memory fails,
     /// potentially due to insufficient access rights.
     pub fn scan_mem<'scanner, S>(
         &self,
@@ -1041,7 +1100,7 @@ impl Process {
     ///
     /// # Errors
     ///
-    /// Returns [`crate::ProcessError::NtStatus`] if reading or
+    /// Returns [`ProcessError::NtStatus`] if reading or
     /// querying the memory fails, potentially due to insufficient access rights.
     #[inline(always)]
     pub fn mem_regions<'process>(
@@ -1085,18 +1144,21 @@ impl Process {
     /// ```
     pub fn set_instrumentation_callback(
         &self,
-        callback: ProcessInstrumentationCallback,
+        callback: Option<ProcessInstrumentationCallback>,
     ) -> Result<()> {
         let mut callback_info = ProcessInstrumentationCallbackInfo {
             version: 0,
             reserved: 0,
-            callback: callback as _,
+            callback: callback
+                .map(|ptr| ptr as _)
+                .unwrap_or(ptr::null_mut()),
         };
 
         let status = nt_set_information_process(
             self.0,
             0x28, // ProcessInstrumentationCallback
-            (&mut callback_info as *mut ProcessInstrumentationCallbackInfo) as _,
+            (&mut callback_info as *mut ProcessInstrumentationCallbackInfo)
+                as _,
             size_of::<ProcessInstrumentationCallbackInfo>() as u32,
         );
 
@@ -1106,7 +1168,35 @@ impl Process {
         }
     }
 
-    pub(crate) fn read_unicode_string(&self, unicode_string: &UnicodeString) -> Result<String> {
+    /// Returns the Vectored Handlers in a process.
+    ///
+    /// # Access Rights
+    ///
+    /// If this is a remote process,
+    /// this method requires the process handle access mask to include:
+    ///
+    /// - [`ProcessAccess::VM_READ`],
+    /// - [`ProcessAccess::VM_WRITE`], **and**
+    /// - [`ProcessAccess::QUERY_INFORMATION`] **or** [`ProcessAccess::QUERY_LIMITED_INFORMATION`]
+    ///
+    /// Without this right, the system call will fail with an
+    /// `NTSTATUS` error.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ProcessError::NtStatus`] if reading or
+    /// querying the memory fails, potentially due to insufficient access rights.
+	#[cfg(feature = "vectored_handlers")]
+    pub fn vectored_handlers<'process>(
+        &'process self,
+    ) -> Result<VectoredHandlerList<'process>> {
+        VectoredHandlerList::new(self)
+    }
+
+    pub(crate) fn read_unicode_string(
+        &self,
+        unicode_string: &UnicodeString,
+    ) -> Result<String> {
         let ptr = unicode_string.buffer;
         if ptr.is_null() || unicode_string.length == 0 {
             return Err(ProcessError::InvalidUnicodeString);
@@ -1117,6 +1207,22 @@ impl Process {
         self.read_to_slice(unicode_string.buffer, &mut buf)?;
 
         Ok(String::from_utf16_lossy(&buf))
+    }
+
+    pub(crate) fn cookie(&self) -> Result<u32> {
+        let mut cookie = 0u32;
+        let status = nt_query_information_process(
+            self.0,
+            0x24, // ProcessCookie
+            (&mut cookie as *mut u32) as _,
+            size_of::<u32>() as u32,
+            ptr::null_mut(),
+        );
+
+        match status {
+            0 => Ok(cookie),
+            _ => Err(ProcessError::NtStatus(status)),
+        }
     }
 }
 
@@ -1137,8 +1243,9 @@ mod tests {
 
     #[test]
     fn open_process() {
-        let _process = Process::open_first_named("Discord.exe", ProcessAccess::ALL)
-            .expect("failed to open remote process");
+        let _process =
+            Process::open_first_named("Discord.exe", ProcessAccess::ALL)
+                .expect("failed to open remote process");
     }
 
     #[test]
@@ -1149,19 +1256,24 @@ mod tests {
             .expect("failed to find process (discord.exe)");
         let pid = view.pid;
 
-        let process = Process::open(pid, ProcessAccess::QUERY_LIMITED_INFORMATION)
-            .expect("failed to open process");
-        let proc_pid = process.pid().expect("failed to get pid of process");
+        let process =
+            Process::open(pid, ProcessAccess::QUERY_LIMITED_INFORMATION)
+                .expect("failed to open process");
+        let proc_pid =
+            process.pid().expect("failed to get pid of process");
 
         assert_eq!(pid, proc_pid)
     }
 
     #[test]
     fn iter_modules() -> Result<()> {
-        let process = Process::open_first_named("Discord.exe", ProcessAccess::ALL)?;
-        let modules: Vec<Module> = process.modules(ModuleIterOrder::default())?.collect();
+        let process =
+            Process::open_first_named("Discord.exe", ProcessAccess::ALL)?;
+        let modules: Vec<Module> =
+            process.modules(ModuleIterOrder::default())?.collect();
 
-        const MODULES: [&str; 4] = ["discord.exe", "ntdll.dll", "kernel32.dll", "kernelbase.dll"];
+        const MODULES: [&str; 4] =
+            ["discord.exe", "ntdll.dll", "kernel32.dll", "kernelbase.dll"];
         for name in MODULES {
             assert!(
                 modules.iter().any(|m| m.name.eq_ignore_ascii_case(name)),
@@ -1187,18 +1299,23 @@ mod tests {
 
     #[test]
     fn duplicate_handle() {
-        let process = Process::open_first_named("Discord.exe", ProcessAccess::ALL)
-            .expect("failed to open remote process");
+        let process =
+            Process::open_first_named("Discord.exe", ProcessAccess::ALL)
+                .expect("failed to open remote process");
 
-        let duplicated = process.duplicate().expect("failed to duplicate process");
+        let duplicated =
+            process.duplicate().expect("failed to duplicate process");
 
         // ensure that the handles aren't the same
-        assert_ne!(unsafe { process.handle() }, unsafe { duplicated.handle() });
+        assert_ne!(unsafe { process.handle() }, unsafe {
+            duplicated.handle()
+        });
     }
 
     #[test]
     fn query_memory() -> Result<()> {
-        let process = Process::open_first_named("Discord.exe", ProcessAccess::ALL)?;
+        let process =
+            Process::open_first_named("Discord.exe", ProcessAccess::ALL)?;
 
         let ntdll = process
             .modules(ModuleIterOrder::Load)?
@@ -1209,19 +1326,15 @@ mod tests {
 
         let _info = process.query_mem(ntdll.base_address)?;
 
-        // assert!(
-        //     info.protection == MemoryProtection::EXECUTE_WRITECOPY
-        //         && info.r#type == MemoryType::IMAGE
-        //         && info.state == MemoryState::COMMIT,
-        //     "invalid ntdll memory"
-        // );
+        // TODO: check region?
 
         Ok(())
     }
 
     #[test]
     fn protect_memory() -> Result<()> {
-        let process = Process::open_first_named("Discord.exe", ProcessAccess::ALL)?;
+        let process =
+            Process::open_first_named("Discord.exe", ProcessAccess::ALL)?;
 
         // allocate new memory
         let allocation = process.alloc_mem(
@@ -1232,9 +1345,14 @@ mod tests {
         )?;
 
         let new_protection = MemoryProtection::EXECUTE_READWRITE;
-        let prev_protection = process.protect_mem(allocation.address, 0x100, new_protection)?;
+        let prev_protection = process.protect_mem(
+            allocation.address,
+            0x100,
+            new_protection,
+        )?;
 
-        let queried_protection = process.query_mem(allocation.address)?.protection;
+        let queried_protection =
+            process.query_mem(allocation.address)?.protection;
         assert_eq!(
             new_protection, queried_protection,
             "failed to modify protection on remote process memory allocation"
@@ -1243,18 +1361,24 @@ mod tests {
         // reset memory protection
         process.protect_mem(allocation.address, 0x100, prev_protection)?;
 
-        let queried_protection = process.query_mem(allocation.address)?.protection;
+        let queried_protection =
+            process.query_mem(allocation.address)?.protection;
         assert_eq!(
             prev_protection, queried_protection,
             "failed to reset protection on remote process memory allocation"
         );
 
-        process.free_mem(allocation.address, allocation.size, FreeType::RELEASE)
+        process.free_mem(
+            allocation.address,
+            allocation.size,
+            FreeType::RELEASE,
+        )
     }
 
     #[test]
     fn allocate_memory() -> Result<()> {
-        let process = Process::open_first_named("Discord.exe", ProcessAccess::ALL)?;
+        let process =
+            Process::open_first_named("Discord.exe", ProcessAccess::ALL)?;
 
         let allocation = process.alloc_mem(
             None,
@@ -1273,7 +1397,8 @@ mod tests {
 
     #[test]
     fn query_name() -> Result<()> {
-        let process = Process::open_first_named("Discord.exe", ProcessAccess::ALL)?;
+        let process =
+            Process::open_first_named("Discord.exe", ProcessAccess::ALL)?;
         let queried_name = process.name()?;
 
         assert_eq!("Discord.exe", queried_name, "mismatched name");
@@ -1282,16 +1407,21 @@ mod tests {
 
     #[test]
     fn threads() -> Result<()> {
-        let process = Process::open_first_named("Discord.exe", ProcessAccess::ALL)?;
+        let process =
+            Process::open_first_named("Discord.exe", ProcessAccess::ALL)?;
         let threads = process.threads()?;
 
-        assert!(!threads.is_empty(), "failed to get remote process threads");
+        assert!(
+            !threads.is_empty(),
+            "failed to get remote process threads"
+        );
         Ok(())
     }
 
     #[test]
     fn module_exports() -> Result<()> {
-        let process = Process::open_first_named("Discord.exe", ProcessAccess::ALL)?;
+        let process =
+            Process::open_first_named("Discord.exe", ProcessAccess::ALL)?;
 
         let ntdll = process
             .modules(ModuleIterOrder::Load)?
@@ -1299,7 +1429,10 @@ mod tests {
             .expect("failed to get first module of remote process");
 
         unsafe extern "system" {
-            fn GetProcAddress(hmodule: usize, proc_name: *const u8) -> usize;
+            fn GetProcAddress(
+                hmodule: usize,
+                proc_name: *const u8,
+            ) -> usize;
         }
 
         let addr = ntdll.get_export("NtOpenProcess")?;
@@ -1318,7 +1451,8 @@ mod tests {
 
     #[test]
     fn pattern_scan() -> Result<()> {
-        let process = Process::open_first_named("Discord.exe", ProcessAccess::ALL)?;
+        let process =
+            Process::open_first_named("Discord.exe", ProcessAccess::ALL)?;
         let ntdll = process
             .modules(ModuleIterOrder::Load)?
             .nth(1)
@@ -1355,8 +1489,10 @@ mod tests {
 
     #[test]
     fn times() -> Result<()> {
-        let process =
-            Process::open_first_named("Discord.exe", ProcessAccess::QUERY_LIMITED_INFORMATION)?;
+        let process = Process::open_first_named(
+            "Discord.exe",
+            ProcessAccess::QUERY_LIMITED_INFORMATION,
+        )?;
         let times = process.times()?;
 
         assert_eq!(

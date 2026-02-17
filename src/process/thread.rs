@@ -160,12 +160,12 @@ impl Thread {
     /// Without this right, the system call will fail with an
     /// `NTSTATUS` error.
     ///
-    /// # Parameters
+    /// # Arguments
     ///
     /// - `timeout`:
     ///   An optional duration to wait.
     ///   - `None` waits indefinitely.
-    ///   - `Some(d)` waits up to `d`.
+    ///   - `Some(duration)` waits up to `duration`.
     ///
     /// - `allow_apc`:
     ///   If `true`, the wait may return early due to queued APCs.

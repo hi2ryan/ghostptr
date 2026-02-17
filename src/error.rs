@@ -15,7 +15,7 @@ pub enum ProcessError {
     // modules
     MalformedPE,
     ForwardDepthExceeded,
-	InvalidForwarderName(String),
+    InvalidForwarderName(String),
 
     // ..NotFound's
     ProcessNotFound(String),
@@ -27,6 +27,10 @@ pub enum ProcessError {
     // rtti
     #[cfg(feature = "rtti")]
     TypeNotFound(String),
+
+    // vectored handlers
+	#[cfg(feature = "vectored_handlers")]
+    VectoredHandlerNotFound(usize),
 }
 
 impl Display for ProcessError {
@@ -68,7 +72,12 @@ impl Display for ProcessError {
 			// rtti
 			#[cfg(feature = "rtti")]
 			ProcessError::TypeNotFound(name)  =>
-				write!(f, "RTTI Type '{name}' not found")
+				write!(f, "RTTI Type '{name}' not found"),
+
+			// vectored handlers
+			#[cfg(feature = "vectored_handlers")]
+			ProcessError::VectoredHandlerNotFound(handler_addr) =>
+				write!(f, "Vectored Handler Entry of handler {:#X} not found", *handler_addr),
 		}
     }
 }

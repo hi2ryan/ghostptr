@@ -1,4 +1,6 @@
-use crate::windows::structs::{PsAttributeList, ThreadContext, TokenPrivileges};
+use crate::windows::structs::{
+    PsAttributeList, ThreadContext, TokenPrivileges,
+};
 
 use super::{
     Handle, NtStatus,
@@ -42,7 +44,10 @@ pub fn nt_open_process(
 
 /// NtTerminateProcess
 #[inline(always)]
-pub fn nt_terminate_process(process_handle: Handle, exit_status: NtStatus) -> NtStatus {
+pub fn nt_terminate_process(
+    process_handle: Handle,
+    exit_status: NtStatus,
+) -> NtStatus {
     let status: NtStatus;
     let id = syscalls().nt_terminate_process;
 
@@ -69,8 +74,8 @@ pub fn nt_terminate_process(process_handle: Handle, exit_status: NtStatus) -> Nt
 pub fn nt_set_information_process(
     process_handle: Handle,
     process_info_class: u32,
-	process_info: *mut c_void,
-	info_len: u32,
+    process_info: *mut c_void,
+    info_len: u32,
 ) -> NtStatus {
     let status: NtStatus;
     let id = syscalls().nt_set_information_process;
@@ -82,8 +87,8 @@ pub fn nt_set_information_process(
 
             in("rcx") process_handle,
             in("rdx") process_info_class,
-			in("r8") process_info,
-			in("r9") info_len,
+            in("r8") process_info,
+            in("r9") info_len,
 
             in("rax") id,
             lateout("rax") status,
@@ -377,29 +382,29 @@ pub fn nt_create_thread_ex(
             "sub rsp, 0x60",
             "mov [rsp + 0x28], {start_routine}",
             "mov [rsp + 0x30], {argument}",
-			"mov [rsp + 0x38], {create_flags:e}",
-			"mov [rsp + 0x40], {zero_bits}",
-			"mov [rsp + 0x48], {stack_size}",
-			"mov [rsp + 0x50], {maximum_stack_size}",
-			"mov [rsp + 0x58], {attribute_list}",
+            "mov [rsp + 0x38], {create_flags:e}",
+            "mov [rsp + 0x40], {zero_bits}",
+            "mov [rsp + 0x48], {stack_size}",
+            "mov [rsp + 0x50], {maximum_stack_size}",
+            "mov [rsp + 0x58], {attribute_list}",
 
             "mov r10, rcx",
             "syscall",
 
             "add rsp, 0x60",
 
-			in("rcx") thread_handle,
-			in("rdx") desired_access,
-			in("r8") object_attributes,
-			in("r9") process_handle,
+            in("rcx") thread_handle,
+            in("rdx") desired_access,
+            in("r8") object_attributes,
+            in("r9") process_handle,
 
-			start_routine = in(reg) start_routine,
-			argument = in(reg) argument,
-			create_flags = in(reg) create_flags,
-			zero_bits = in(reg) zero_bits,
-			stack_size = in(reg) stack_size,
-			maximum_stack_size = in(reg) maximum_stack_size,
-			attribute_list = in(reg) attribute_list,
+            start_routine = in(reg) start_routine,
+            argument = in(reg) argument,
+            create_flags = in(reg) create_flags,
+            zero_bits = in(reg) zero_bits,
+            stack_size = in(reg) stack_size,
+            maximum_stack_size = in(reg) maximum_stack_size,
+            attribute_list = in(reg) attribute_list,
 
             in("rax") id,
             lateout("rax") status,
@@ -413,7 +418,10 @@ pub fn nt_create_thread_ex(
 
 /// NtOpenThread
 #[inline(always)]
-pub fn nt_terminate_thread(thread_handle: Handle, exit_status: NtStatus) -> NtStatus {
+pub fn nt_terminate_thread(
+    thread_handle: Handle,
+    exit_status: NtStatus,
+) -> NtStatus {
     let status: NtStatus;
     let id = syscalls().nt_terminate_thread;
 
@@ -437,7 +445,10 @@ pub fn nt_terminate_thread(thread_handle: Handle, exit_status: NtStatus) -> NtSt
 
 /// NtSuspendThread
 #[inline(always)]
-pub fn nt_suspend_thread(thread_handle: Handle, prev_suspend_count: *mut u32) -> NtStatus {
+pub fn nt_suspend_thread(
+    thread_handle: Handle,
+    prev_suspend_count: *mut u32,
+) -> NtStatus {
     let status: NtStatus;
     let id = syscalls().nt_suspend_thread;
 
@@ -461,7 +472,10 @@ pub fn nt_suspend_thread(thread_handle: Handle, prev_suspend_count: *mut u32) ->
 
 /// NtSuspendThread
 #[inline(always)]
-pub fn nt_resume_thread(thread_handle: Handle, prev_suspend_count: *mut u32) -> NtStatus {
+pub fn nt_resume_thread(
+    thread_handle: Handle,
+    prev_suspend_count: *mut u32,
+) -> NtStatus {
     let status: NtStatus;
     let id = syscalls().nt_resume_thread;
 
@@ -542,8 +556,8 @@ pub fn nt_set_context_thread(
 pub fn nt_set_information_thread(
     thread_handle: Handle,
     thread_info_class: u32,
-	thread_info: *const c_void,
-	info_len: u32,
+    thread_info: *const c_void,
+    info_len: u32,
 ) -> NtStatus {
     let status: NtStatus;
     let id = syscalls().nt_set_information_thread;
@@ -555,8 +569,8 @@ pub fn nt_set_information_thread(
 
             in("rcx") thread_handle,
             in("rdx") thread_info_class,
-			in("r8") thread_info,
-			in("r9") info_len,
+            in("r8") thread_info,
+            in("r9") info_len,
 
             in("rax") id,
             lateout("rax") status,
@@ -686,9 +700,9 @@ pub fn nt_duplicate_object(
 pub fn nt_query_object(
     handle: Handle,
     object_info_class: u32,
-	object_info: *mut c_void,
-	info_len: u32,
-	return_len: *mut u32,
+    object_info: *mut c_void,
+    info_len: u32,
+    return_len: *mut u32,
 ) -> NtStatus {
     let status: NtStatus;
     let id = syscalls().nt_query_object;
@@ -721,8 +735,12 @@ pub fn nt_query_object(
 
 /// NtWaitForSingleObject
 #[inline(always)]
-pub fn nt_wait_for_single_object(handle: Handle, alertable: u8, timeout: *const i64) -> NtStatus {
- let status: NtStatus;
+pub fn nt_wait_for_single_object(
+    handle: Handle,
+    alertable: u8,
+    timeout: *const i64,
+) -> NtStatus {
+    let status: NtStatus;
     let id = syscalls().nt_wait_for_single_object;
 
     unsafe {
@@ -782,7 +800,11 @@ pub fn nt_query_information_thread(
 
 /// NtOpenProcessToken
 #[inline(always)]
-pub fn nt_open_process_token(process_handle: Handle, desired_access: u32, token_handle: *mut Handle) -> NtStatus {
+pub fn nt_open_process_token(
+    process_handle: Handle,
+    desired_access: u32,
+    token_handle: *mut Handle,
+) -> NtStatus {
     let status: NtStatus;
     let id = syscalls().nt_open_process_token;
 
@@ -792,8 +814,8 @@ pub fn nt_open_process_token(process_handle: Handle, desired_access: u32, token_
             "syscall",
 
             in("rcx") process_handle,
-			in("rdx") desired_access,
-			in("r8") token_handle,
+            in("rdx") desired_access,
+            in("r8") token_handle,
 
             in("rax") id,
             lateout("rax") status,
@@ -808,12 +830,12 @@ pub fn nt_open_process_token(process_handle: Handle, desired_access: u32, token_
 /// NtAdjustPrivilegeToken
 #[inline(always)]
 pub fn nt_adjust_privileges_token(
-	token_handle: Handle,
-	disable_all_privileges: u32,
-	new_state: *mut TokenPrivileges,
-	buffer_length: u32,
-	previous_state: *mut TokenPrivileges,
-	return_length: *mut u32,
+    token_handle: Handle,
+    disable_all_privileges: u32,
+    new_state: *mut TokenPrivileges,
+    buffer_length: u32,
+    previous_state: *mut TokenPrivileges,
+    return_length: *mut u32,
 ) -> NtStatus {
     let status: NtStatus;
     let id = syscalls().nt_adjust_privileges_token;
@@ -822,17 +844,17 @@ pub fn nt_adjust_privileges_token(
         asm!(
             "sub rsp, 0x38",
             "mov [rsp + 0x28], {previous_state}",
-			"mov [rsp + 0x30], {return_length}",
+            "mov [rsp + 0x30], {return_length}",
             "mov r10, rcx",
             "syscall",
             "add rsp, 0x38",
 
             in("rcx") token_handle,
-			in("rdx") disable_all_privileges,
-			in("r8") new_state,
-			in("r9") buffer_length,
-			previous_state = in(reg) previous_state,
-			return_length = in(reg) return_length,
+            in("rdx") disable_all_privileges,
+            in("r8") new_state,
+            in("r9") buffer_length,
+            previous_state = in(reg) previous_state,
+            return_length = in(reg) return_length,
 
             in("rax") id,
             lateout("rax") status,

@@ -70,7 +70,7 @@ pub struct MemoryRegionInfo {
     pub protection: MemoryProtection,
 
     /// The type of memory backing this region.
-    pub r#type: MemoryType,
+    pub mem_type: MemoryType,
 }
 
 impl MemoryRegionInfo {
@@ -141,7 +141,7 @@ impl From<MemoryBasicInformation> for MemoryRegionInfo {
             size: value.region_size,
             state: MemoryState::from_bits(value.state),
             protection: MemoryProtection::from_bits(value.protection),
-            r#type: MemoryType::from_bits(value.r#type),
+            mem_type: MemoryType::from_bits(value.mem_type),
         }
     }
 }
@@ -307,15 +307,15 @@ impl<'process> MemoryAllocation<'process> {
         process: &'process Process,
         address: Option<usize>,
         size: usize,
-        r#type: AllocationType,
+        allocation_type: AllocationType,
         protection: MemoryProtection,
     ) -> Result<Self> {
-        process.alloc_mem(address, size, r#type, protection)
+        process.alloc_mem(address, size, allocation_type, protection)
     }
 
     #[inline(always)]
-    pub fn free(&self, r#type: FreeType) -> Result<()> {
-        self.process.free_mem(self.address, self.size, r#type)
+    pub fn free(&self, free_type: FreeType) -> Result<()> {
+        self.process.free_mem(self.address, self.size, free_type)
     }
 
     #[inline(always)]

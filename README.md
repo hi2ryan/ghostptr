@@ -1,4 +1,4 @@
-# ghostptr
+# ghostptr 👻
 
 [![MIT License](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![crates.io](https://img.shields.io/crates/v/ghostptr.svg)](https://crates.io/crates/ghostptr)
@@ -8,13 +8,13 @@ Lightweight, ergonomic library for low‑level Windows process interaction.
 
 ## Design
 
-The purpose of this library is to provide simple, minimal abstractions over Windows NT primitives. The API offers ergonomic access to process handles and memory while preserving safety wherever it can be guaranteed..
+The purpose of this library is to provide simple, minimal abstractions over Windows NT primitives. The API offers ergonomic access to process handles and memory while preserving safety wherever it can be guaranteed.
 
 ## Installation
 
 ```toml
 [dependencies]
-ghostptr = "0.2.3"
+ghostptr = "0.2.4"
 ```
 
 ## Quick Start

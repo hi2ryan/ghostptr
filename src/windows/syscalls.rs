@@ -4,7 +4,7 @@ use crate::windows::utils::{get_export, get_module_base};
 
 // static NTDLL_BASE: OnceLock<usize> = OnceLock::new();
 static NTDLL_BASE: LazyLock<usize> = LazyLock::new(|| {
-	get_module_base("ntdll.dll").expect("ntdll.dll not found") as usize
+    get_module_base("ntdll.dll").expect("ntdll.dll not found") as usize
 });
 // static SYSCALLS: OnceLock<Syscalls> = OnceLock::new();
 static SYSCALLS: LazyLock<Syscalls> = LazyLock::new(Syscalls::resolve);
@@ -32,35 +32,35 @@ macro_rules! syscalls {
 
 syscalls! {
     nt_open_process => "NtOpenProcess",
-	nt_terminate_process => "NtTerminateProcess",
-	nt_set_information_process => "NtSetInformationProcess",
+    nt_terminate_process => "NtTerminateProcess",
+    nt_set_information_process => "NtSetInformationProcess",
 
     nt_read_virtual_memory => "NtReadVirtualMemory",
     nt_write_virtual_memory => "NtWriteVirtualMemory",
-	nt_query_virtual_memory => "NtQueryVirtualMemory",
-	nt_protect_virtual_memory => "NtProtectVirtualMemory",
-	nt_allocate_virtual_memory => "NtAllocateVirtualMemory",
-	nt_free_virtual_memory => "NtFreeVirtualMemory",
+    nt_query_virtual_memory => "NtQueryVirtualMemory",
+    nt_protect_virtual_memory => "NtProtectVirtualMemory",
+    nt_allocate_virtual_memory => "NtAllocateVirtualMemory",
+    nt_free_virtual_memory => "NtFreeVirtualMemory",
 
-	nt_open_thread => "NtOpenThread",
-	nt_create_thread_ex => "NtCreateThreadEx",
-	nt_terminate_thread => "NtTerminateThread",
-	nt_suspend_thread => "NtSuspendThread",
-	nt_resume_thread => "NtResumeThread",
-	nt_get_context_thread => "NtGetContextThread",
-	nt_set_context_thread => "NtSetContextThread",
-	nt_set_information_thread => "NtSetInformationThread",
+    nt_open_thread => "NtOpenThread",
+    nt_create_thread_ex => "NtCreateThreadEx",
+    nt_terminate_thread => "NtTerminateThread",
+    nt_suspend_thread => "NtSuspendThread",
+    nt_resume_thread => "NtResumeThread",
+    nt_get_context_thread => "NtGetContextThread",
+    nt_set_context_thread => "NtSetContextThread",
+    nt_set_information_thread => "NtSetInformationThread",
 
     nt_query_system_information => "NtQuerySystemInformation",
     nt_query_information_process => "NtQueryInformationProcess",
-	nt_query_information_thread => "NtQueryInformationThread",
+    nt_query_information_thread => "NtQueryInformationThread",
 
-	nt_duplicate_object => "NtDuplicateObject",
-	nt_query_object => "NtQueryObject",
-	nt_wait_for_single_object => "NtWaitForSingleObject",
+    nt_duplicate_object => "NtDuplicateObject",
+    nt_query_object => "NtQueryObject",
+    nt_wait_for_single_object => "NtWaitForSingleObject",
 
-	nt_open_process_token => "NtOpenProcessToken",
-	nt_adjust_privileges_token => "NtAdjustPrivilegesToken",
+    nt_open_process_token => "NtOpenProcessToken",
+    nt_adjust_privileges_token => "NtAdjustPrivilegesToken",
 
     nt_close => "NtClose",
 }

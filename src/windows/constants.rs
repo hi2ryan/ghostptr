@@ -1,6 +1,7 @@
-use super::{NtStatus, Handle};
+use super::{Handle, NtStatus};
 
-pub const STATUS_INFO_LENGTH_MISMATCH: NtStatus = 0xC0000004u32 as NtStatus;
+pub const STATUS_INFO_LENGTH_MISMATCH: NtStatus =
+    0xC0000004u32 as NtStatus;
 pub const STATUS_BUFFER_TOO_SMALL: NtStatus = 0xC0000023u32 as NtStatus;
 pub const STATUS_BUFFER_OVERFLOW: NtStatus = 0x80000005u32 as NtStatus;
 

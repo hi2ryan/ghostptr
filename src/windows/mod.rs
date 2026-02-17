@@ -1,3 +1,6 @@
+pub use flags::ExceptionHandler;
+pub use structs::ExceptionPointers;
+
 pub mod constants;
 pub mod flags;
 pub mod structs;
@@ -14,5 +17,13 @@ pub type DllEntryPoint = extern "system" fn(
     context: *const core::ffi::c_void,
 );
 
-pub type ProcessInstrumentationCallback =
-    extern "system" fn(original_rsp: u64, return_address: u64, return_value: u64);
+pub type ProcessInstrumentationCallback = extern "system" fn(
+    original_rsp: u64,
+    return_address: u64,
+    return_value: u64,
+);
+
+pub type VectoredExceptionHandler = extern "system" fn(
+    exception_info: *mut ExceptionPointers,
+)
+    -> ExceptionHandler;
