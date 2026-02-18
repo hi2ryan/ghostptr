@@ -6,12 +6,10 @@ pub mod utils;
 #[cfg(feature = "vectored_handlers")]
 use crate::vectored_handlers::VectoredHandlerList;
 
-use crate::{
-    windows::{
-        ProcessInstrumentationCallback, flags::*,
-        structs::ProcessInstrumentationCallbackInfo,
-        wrappers::nt_set_information_process,
-    },
+use crate::windows::{
+    ProcessInstrumentationCallback, flags::*,
+    structs::ProcessInstrumentationCallbackInfo,
+    wrappers::nt_set_information_process,
 };
 pub use region::MemoryRegionIter;
 pub use scan::MemScanIter;
@@ -1186,7 +1184,7 @@ impl Process {
     ///
     /// Returns [`ProcessError::NtStatus`] if reading or
     /// querying the memory fails, potentially due to insufficient access rights.
-	#[cfg(feature = "vectored_handlers")]
+    #[cfg(feature = "vectored_handlers")]
     pub fn vectored_handlers<'process>(
         &'process self,
     ) -> Result<VectoredHandlerList<'process>> {
@@ -1435,7 +1433,7 @@ mod tests {
             ) -> usize;
         }
 
-        let addr = ntdll.get_export("NtOpenProcess")?;
+        let addr = ntdll.get_proc_address("NtOpenProcess")?;
         let addr2 = unsafe {
             let proc_name = b"NtOpenProcess\0";
             GetProcAddress(ntdll.base_address, proc_name.as_ptr())
@@ -1458,7 +1456,7 @@ mod tests {
             .nth(1)
             .expect("failed to get first module of remote process");
 
-        let nt_open_process_addr = ntdll.get_export("NtOpenProcess")?;
+        let nt_open_process_addr = ntdll.get_proc_address("NtOpenProcess")?;
 
         let ssn = crate::windows::syscalls::syscalls().nt_open_process;
         let ssn_bytes = ssn

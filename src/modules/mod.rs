@@ -8,18 +8,20 @@ pub use section::Section;
 
 use crate::{
     MemScanIter, ProcessError, Result, Scanner, SectionCharacteristics,
+    modules::export::{ExportForwarder, ForwardedBy},
     process::{MemoryRegionIter, Process},
     utils::AddressRange,
     windows::{
         DllEntryPoint,
         structs::{
-            ImageDataDirectory, ImageDosHeader, ImageExportDirectory, ImageImportDescriptor,
-            ImageNtHeaders64, ImageOptionalHeader64, ImageSectionHeader, LdrDllLoadReason,
-            LdrModule,
+            ImageDataDirectory, ImageDosHeader, ImageExportDirectory,
+            ImageImportDescriptor, ImageNtHeaders64,
+            ImageOptionalHeader64, ImageSectionHeader, LdrDllLoadReason,
+            LoaderDataTableEntry,
         },
     },
 };
-use core::{ffi::CStr, mem::offset_of};
+use core::{cmp::Ordering, ffi::CStr, mem::offset_of};
 
 /// A view of a module loaded in a process (local or remote).
 #[derive(Debug, Clone)]
@@ -177,23 +179,22 @@ impl<'process> Module<'process> {
         self.flags
     }
 
-	#[inline(always)]
-	pub fn process(&self) -> &'process Process {
-		self.process
-	}
+    #[inline(always)]
+    pub fn process(&self) -> &'process Process {
+        self.process
+    }
 
-    /// Enumerates all exports from this module.
+    /// Returns an iterator over all exports from this module.
     ///
     /// Parses the PE headers in the target process, walks the export
     /// directory, and returns a list of [`Export`] entries. Both named and
     /// ordinal-only exports are included.
     ///
-    /// For forwarded exports (where the export entry points *back* into the
-    /// export directory), `forwarded_to` will be set and `address` will be `0`.
-    ///
     /// # Errors
-    /// - [`ProcessError::MalformedPE`] if the module appears to have no
-    ///   export directory or the PE headers are inconsistent.
+    /// - [`ProcessError::MalformedPE`] if the module appears to have
+	///   invalid PE headers.
+	/// - [`ProcessError::NoExportDirectory`] if the module appears to have no
+    ///   export directory (rva = 0).
     /// - [`ProcessError::NtStatus`] if reading memory fails.
     ///
     /// # Example
@@ -202,18 +203,16 @@ impl<'process> Module<'process> {
     ///     println!("export name: {:?} | ordinal: {} | address: {:#X}", export.name, export.ordinal, export.address);
     /// }
     /// ```
-    pub fn exports<'module>(&'module self) -> Result<ExportIterator<'process, 'module>> {
+    pub fn exports<'module>(
+        &'module self,
+    ) -> Result<ExportIterator<'process, 'module>> {
         ExportIterator::new(self)
     }
 
-    /// Looks up an exported procedure by name and returns its address.
+    /// Looks up an exported procedure by name and returns its data.
     ///
     /// Walks the export directory of the module's PE header, searching for
     /// the name. Returns the function's VA within the target process, if found.
-    ///
-    /// Forwarded exports are **not** resolved by this method; if the name
-    /// refers to a forwarder, you will receive the address of the forwarder
-    /// string, not the final target.
     ///
     /// # Errors
     ///
@@ -228,45 +227,149 @@ impl<'process> Module<'process> {
     /// let addr = kernel32.get_export("LoadLibraryA")?;
     /// let load_library_a: LoadLibraryA = unsafe { std::mem::transmute(addr) };
     /// ```
-    pub fn get_export(&self, name: &str) -> Result<usize> {
-        self.exports()?
-            .find(|export| {
-                export
-                    .name
-                    .as_ref()
-                    .is_some_and(|export_name| export_name == name)
-            })
-            .map(|export| export.address)
-            .ok_or(ProcessError::ExportNotFound(name.to_owned()))
+    pub fn get_export(&self, name: &str) -> Result<Export> {
+        // parse exports
+		let (export_data_dir, export_directory) =
+            self.export_directory()?;
+        let (names, ordinals, functions) =
+            self.resolve_exports(&export_directory)?;
+
+        let mut lo = 0usize;
+        let mut hi = names.len().saturating_sub(1);
+
+        // binary search
+        let export = 'search: {
+            while lo <= hi {
+                let mid = lo + (hi - lo) / 2;
+
+				// read name
+                let rva = names[mid];
+                let name_va = self.base_address.wrapping_add(rva as usize);
+                let mid_name =
+                    match self.process.read_c_string(name_va, None) {
+                        Ok(name) => name,
+                        Err(_) => continue,
+                    };
+
+				// compare
+                match mid_name.as_str().cmp(name) {
+                    Ordering::Equal => {
+                        let ordinal = ordinals[mid];
+                        let rva = functions[ordinal as usize];
+                        let address = self.base_address + rva as usize;
+
+                        break 'search Some(Export {
+                            name: Some(mid_name),
+                            ordinal,
+                            address,
+                            forwarder: None,
+                        });
+                    }
+                    Ordering::Less => lo = mid + 1,
+                    Ordering::Greater => {
+                        if mid == 0 {
+                            break;
+                        }
+                        hi = mid - 1;
+                    }
+                }
+            }
+
+            None
+        };
+
+        if let Some(mut export) = export {
+            // check if its forwarded (points back into export directory)
+            let address = export.address;
+            let rva = (address - self.base_address) as u32;
+            if rva >= export_data_dir.virtual_address
+                && rva
+                    < export_data_dir.virtual_address
+                        + export_data_dir.size
+            {
+                // forwarded; address is the address to a forwarder name
+                if let Some((forwarder, forwarded_addr)) =
+                    self.resolve_forwarded_export(address)
+                {
+                    export.forwarder = Some(forwarder);
+                    export.address = forwarded_addr;
+                }
+            };
+
+            Ok(export)
+        } else {
+            Err(ProcessError::ExportNotFound(name.to_owned()))
+        }
+    }
+
+    /// Looks up an exported procedure by name and returns its data.
+    ///
+    /// Walks the export directory of the module's PE header, searching for
+    /// the name. Returns the function's VA within the target process, if found.
+    ///
+    /// # Errors
+    ///
+    /// - [`ProcessError::MalformedPE`] if the export directory cannot be located.
+    /// - [`ProcessError::ExportNotFound`] if no export with the given name exists in this module.
+    /// - [`ProcessError::NtStatus`] if reading memory fails.
+    ///
+    /// # Example
+    /// ```rust
+    /// type LoadLibraryA = unsafe extern "system" fn(*const c_char) -> HMODULE;
+    ///
+    /// let addr = kernel32.get_export("LoadLibraryA")?;
+    /// let load_library_a: LoadLibraryA = unsafe { std::mem::transmute(addr) };
+    /// ```
+    pub fn get_export_by_ordinal(&self, ordinal: u16) -> Result<Export> {
+        // parse exports
+        let (export_data_dir, export_directory) =
+            self.export_directory()?;
+        let (names, _, functions) =
+            self.resolve_exports(&export_directory)?;
+
+        // ordinals are offset by the ordinal base
+        let ord_offset = ordinal as usize;
+        let index =
+            ord_offset.wrapping_sub(export_directory.base as usize);
+
+        // get function RVA
+        let rva = functions.get(index).copied().ok_or_else(|| {
+            ProcessError::ExportNotFound(ordinal.to_string())
+        })?;
+
+        // read export name if existent
+        let name = names.get(index).copied().and_then(|rva| {
+            self.process
+                .read_c_string(self.base_address + rva as usize, None)
+                .ok()
+        });
+
+        // build export
+        let address = self.base_address + rva as usize;
+        let mut export = Export {
+            name,
+            address,
+            ordinal,
+            forwarder: None,
+        };
+
+        // check if its forwarded
+        if rva >= export_data_dir.virtual_address
+            && rva < export_data_dir.virtual_address + export_data_dir.size
+            && let Some((forwarder, address)) =
+                self.resolve_forwarded_export(address)
+        {
+			// update export with resolved address and forwarding information
+            export.forwarder = Some(forwarder);
+            export.address = address;
+        }
+
+        Ok(export)
     }
 
     /// Looks up an exported procedure by name and returns its address.
-    ///
-    /// Walks the export directory of the module's PE header, searching for
-    /// the name. Returns the function's VA within the target process, if found.
-    ///
-    /// Forwarded exports are **not** resolved by this method; if the name
-    /// refers to a forwarder, you will receive the address of the forwarder
-    /// string, not the final target.
-    ///
-    /// # Errors
-    ///
-    /// - [`ProcessError::MalformedPE`] if the export directory cannot be located.
-    /// - [`ProcessError::ExportNotFound`] if no export with the given name exists in this module.
-    /// - [`ProcessError::NtStatus`] if reading memory fails.
-    ///
-    /// # Example
-    /// ```rust
-    /// type LoadLibraryA = unsafe extern "system" fn(*const c_char) -> HMODULE;
-    ///
-    /// let addr = kernel32.get_export("LoadLibraryA")?;
-    /// let load_library_a: LoadLibraryA = unsafe { std::mem::transmute(addr) };
-    /// ```
-    pub fn get_export_by_ordinal(&self, ordinal: u16) -> Result<usize> {
-        self.exports()?
-            .find(|export| export.ordinal == ordinal)
-            .map(|export| export.address)
-            .ok_or(ProcessError::ExportNotFound(format!("#{ordinal}")))
+    pub fn get_proc_address(&self, name: &str) -> Result<usize> {
+        self.get_export(name).map(|export| export.address)
     }
 
     /// Parses and returns all imports from this PE module.
@@ -293,15 +396,19 @@ impl<'process> Module<'process> {
         // iterate import descriptors
         let mut curr_import = self.get_first_import_addr()?;
         loop {
-            let descriptor: ImageImportDescriptor = self.process.read_mem(curr_import)?;
-            if descriptor.original_first_thunk == 0 && descriptor.first_thunk == 0 {
+            let descriptor: ImageImportDescriptor =
+                self.process.read_mem(curr_import)?;
+            if descriptor.original_first_thunk == 0
+                && descriptor.first_thunk == 0
+            {
                 break;
             }
 
             // read the name of the imported dll
-            let dll_name = self
-                .process
-                .read_c_string(self.base_address + descriptor.name as usize, None)?;
+            let dll_name = self.process.read_c_string(
+                self.base_address + descriptor.name as usize,
+                None,
+            )?;
 
             let mut functions = Vec::new();
 
@@ -313,7 +420,8 @@ impl<'process> Module<'process> {
             };
 
             // iterate thunks
-            let mut curr_thunk = (self.base_address + thunk_rva as usize) as *const usize;
+            let mut curr_thunk =
+                (self.base_address + thunk_rva as usize) as *const usize;
             loop {
                 // read thunk value
                 let thunk = self.process.read_mem(curr_thunk)?;
@@ -331,8 +439,11 @@ impl<'process> Module<'process> {
 
                     // thunk value is an RVA to import by name
                     // skip the first 2 bytes (hint)
-                    let name_addr = self.base_address + thunk + size_of::<u16>();
-                    let name = self.process.read_c_string(name_addr, Some(256))?;
+                    let name_addr =
+                        self.base_address + thunk + size_of::<u16>();
+                    let name = self
+                        .process
+                        .read_c_string(name_addr, Some(256))?;
                     functions.push(ImportType::Name(name));
                 }
 
@@ -361,22 +472,27 @@ impl<'process> Module<'process> {
     ///     println!("{} | size: {}", section.name, section.size);
     /// }
     /// ```
-    pub fn sections<'module>(&'module self) -> Result<Vec<Section<'process, 'module>>> {
+    pub fn sections<'module>(
+        &'module self,
+    ) -> Result<Vec<Section<'process, 'module>>> {
         let nt_headers = self.nt_headers()?;
 
         // ImageNtHeaders64->FileHeader 	 +0x4
         // ImageFileHeader->NumberOfSections +0x2
-        let num_sections: u16 = self.process.read_mem(nt_headers + 0x4 + 0x2)?;
+        let num_sections: u16 =
+            self.process.read_mem(nt_headers + 0x4 + 0x2)?;
 
         // ImageNtHeaders64->FileHeader 	 	 +0x4
         // ImageFileHeader->SizeOfOptionalHeader +0x10
-        let opt_header_size: u16 = self.process.read_mem(nt_headers + 0x4 + 0x10)?;
+        let opt_header_size: u16 =
+            self.process.read_mem(nt_headers + 0x4 + 0x10)?;
         let mut sections = Vec::with_capacity(num_sections as usize);
 
         // first section is after optional header (after ntheaders)
         let first_section = (nt_headers
             + offset_of!(ImageNtHeaders64, optional_header)
-            + opt_header_size as usize) as *const ImageSectionHeader;
+            + opt_header_size as usize)
+            as *const ImageSectionHeader;
 
         let raw_sections = self
             .process
@@ -393,7 +509,9 @@ impl<'process> Module<'process> {
                 let address_rva = section.virtual_address;
                 let address = self.base_address + address_rva as usize;
                 let size = unsafe { section.misc.virtual_size };
-                let characteristics = SectionCharacteristics::from_bits(section.characteristics);
+                let characteristics = SectionCharacteristics::from_bits(
+                    section.characteristics,
+                );
 
                 sections.push(Section {
                     module: self,
@@ -425,8 +543,13 @@ impl<'process> Module<'process> {
     /// let code_section = module.get_section(".text")?;
     /// println!("code lives at {:#X}", code_section.address);
     /// ```
-    pub fn get_section<'module>(&'module self, name: &str) -> Result<Section<'process, 'module>> {
-        if let Some(section) = self.sections()?.into_iter().find(|s| s.name == name) {
+    pub fn get_section<'module>(
+        &'module self,
+        name: &str,
+    ) -> Result<Section<'process, 'module>> {
+        if let Some(section) =
+            self.sections()?.into_iter().find(|s| s.name == name)
+        {
             Ok(section)
         } else {
             Err(ProcessError::SectionNotFound(name.to_owned()))
@@ -436,15 +559,17 @@ impl<'process> Module<'process> {
     fn nt_headers(&self) -> Result<usize> {
         // self.base_address is the ImageDosHeader
         // e_lfanew is the rva to the ImageNtHeaders64
-        let nt_headers_offset: u32 = self
-            .process
-            .read_mem(self.base_address + offset_of!(ImageDosHeader, e_lfanew))?;
+        let nt_headers_offset: u32 = self.process.read_mem(
+            self.base_address + offset_of!(ImageDosHeader, e_lfanew),
+        )?;
 
         let ptr = self.base_address + nt_headers_offset as usize;
         Ok(ptr)
     }
 
-    pub(crate) fn export_directory(&self) -> Result<(ImageDataDirectory, ImageExportDirectory)> {
+    pub(crate) fn export_directory(
+        &self,
+    ) -> Result<(ImageDataDirectory, ImageExportDirectory)> {
         let nt_headers_ptr = self.nt_headers()?;
         let exp_data_dir: ImageDataDirectory = self.process.read_mem(
             nt_headers_ptr +
@@ -458,7 +583,7 @@ impl<'process> Module<'process> {
 
         let export_dir_rva = exp_data_dir.virtual_address;
         if export_dir_rva == 0 {
-            return Err(ProcessError::MalformedPE);
+            return Err(ProcessError::NoExportDirectory);
         }
 
         let export_dir: ImageExportDirectory = self
@@ -468,47 +593,118 @@ impl<'process> Module<'process> {
         Ok((exp_data_dir, export_dir))
     }
 
-    fn get_first_import_addr(&self) -> Result<*const ImageImportDescriptor> {
+    fn get_first_import_addr(
+        &self,
+    ) -> Result<*const ImageImportDescriptor> {
         let nt_headers_ptr = self.nt_headers()?;
 
         // ImageNtHeaders64->ImageOptionalHeader64      +0x18
         // ImageOptionalHeader64->ImageDataDirectory    +0x70
         // ImageDataDirectory[1]                        +0x8
         // ImageDataDirectory->VirtualAddress		    +0x0
-        let import_dir_rva: u32 = self.process.read_mem(nt_headers_ptr + 0x18 + 0x70 + 0x8)?;
+        let import_dir_rva: u32 =
+            self.process.read_mem(nt_headers_ptr + 0x18 + 0x70 + 0x8)?;
         if import_dir_rva == 0 {
             return Err(ProcessError::MalformedPE);
         }
 
-        Ok((self.base_address + import_dir_rva as usize) as *const ImageImportDescriptor)
+        Ok((self.base_address + import_dir_rva as usize)
+            as *const ImageImportDescriptor)
+    }
+
+    fn resolve_forwarded_export(
+        &self,
+        address: usize,
+    ) -> Option<(ExportForwarder, usize)> {
+        // read forwarder
+        let forwarder_str =
+            self.process.read_c_string(address, None).ok()?;
+
+        // parse forwarder
+        let separator = forwarder_str.rfind('.')?;
+
+        let module_str = &forwarder_str[..separator];
+        if module_str.to_lowercase().starts_with("api-")
+            || module_str.to_lowercase().starts_with("ext-")
+        {
+            // TODO: implement parsing PEB->ApiSetMap
+            // to resolve forwarded module
+            return None;
+        }
+
+        let mut module_name = module_str.to_owned();
+        let forwarded_to = &forwarder_str[separator + 1..];
+
+        // add .dll extension so we can find the module
+        module_name.push_str(".dll");
+
+        // find imported module
+        let imported_module =
+            self.process.get_module(&module_name).ok()?;
+
+        if let Some(ordinal_str) = forwarded_to.strip_prefix("#") {
+            let ordinal: u16 = ordinal_str.parse().ok()?;
+            let address = imported_module
+                .get_export_by_ordinal(ordinal)
+                .ok()?
+                .address;
+
+            Some((
+                ExportForwarder {
+                    dll: module_name,
+                    export: ForwardedBy::Ordinal(ordinal),
+                },
+                address,
+            ))
+        } else {
+            let address =
+                imported_module.get_export(forwarded_to).ok()?.address;
+
+            Some((
+                ExportForwarder {
+                    dll: module_name,
+                    export: ForwardedBy::Name(forwarded_to.to_owned()),
+                },
+                address,
+            ))
+        }
     }
 
     pub(crate) fn resolve_exports(
         &self,
-        export_directory: ImageExportDirectory,
+        export_directory: &ImageExportDirectory,
     ) -> Result<(Vec<u32>, Vec<u16>, Vec<u32>)> {
         // convert RVAs to VAs
-        let names_va = self.base_address + export_directory.address_of_names as usize;
-        let ordinals_va = self.base_address + export_directory.address_of_name_ordinals as usize;
-        let functions_va = self.base_address + export_directory.address_of_functions as usize;
+        let names_va =
+            self.base_address + export_directory.address_of_names as usize;
+        let ordinals_va = self.base_address
+            + export_directory.address_of_name_ordinals as usize;
+        let functions_va = self.base_address
+            + export_directory.address_of_functions as usize;
 
         // read names, ordinals, & functions
-        let names: Vec<u32> = self
-            .process
-            .read_slice(names_va, export_directory.number_of_names as usize)?;
+        let names: Vec<u32> = self.process.read_slice(
+            names_va,
+            export_directory.number_of_names as usize,
+        )?;
 
-        let ordinals: Vec<u16> = self
-            .process
-            .read_slice(ordinals_va, export_directory.number_of_names as usize)?;
+        let ordinals: Vec<u16> = self.process.read_slice(
+            ordinals_va,
+            export_directory.number_of_names as usize,
+        )?;
 
-        let functions: Vec<u32> = self
-            .process
-            .read_slice(functions_va, export_directory.number_of_functions as usize)?;
+        let functions: Vec<u32> = self.process.read_slice(
+            functions_va,
+            export_directory.number_of_functions as usize,
+        )?;
 
         Ok((names, ordinals, functions))
     }
 
-    pub(crate) fn from_raw_ldr_entry(process: &'process Process, ldr_entry: LdrModule) -> Self {
+    pub(crate) fn from_raw_ldr_entry(
+        process: &'process Process,
+        ldr_entry: LoaderDataTableEntry,
+    ) -> Self {
         let name = process
             .read_unicode_string(&ldr_entry.base_dll_name)
             .unwrap_or("???".to_owned());
@@ -561,19 +757,27 @@ impl From<LdrDllLoadReason> for ModuleLoadReason {
     fn from(reason: LdrDllLoadReason) -> Self {
         match reason {
             LdrDllLoadReason::Unknown => ModuleLoadReason::Unknown,
-            LdrDllLoadReason::StaticDependency => ModuleLoadReason::StaticDependency,
+            LdrDllLoadReason::StaticDependency => {
+                ModuleLoadReason::StaticDependency
+            }
             LdrDllLoadReason::StaticForwarderDependency => {
                 ModuleLoadReason::StaticForwarderDependency
             }
             LdrDllLoadReason::DynamicForwarderDependency => {
                 ModuleLoadReason::DynamicForwarderDependency
             }
-            LdrDllLoadReason::DelayloadDependency => ModuleLoadReason::DelayloadDependency,
+            LdrDllLoadReason::DelayloadDependency => {
+                ModuleLoadReason::DelayloadDependency
+            }
             LdrDllLoadReason::DynamicLoad => ModuleLoadReason::DynamicLoad,
             LdrDllLoadReason::AsImageLoad => ModuleLoadReason::AsImageLoad,
             LdrDllLoadReason::AsDataLoad => ModuleLoadReason::AsDataLoad,
-            LdrDllLoadReason::EnclavePrimary => ModuleLoadReason::EnclavePrimary,
-            LdrDllLoadReason::EnclaveDependency => ModuleLoadReason::EnclaveDependency,
+            LdrDllLoadReason::EnclavePrimary => {
+                ModuleLoadReason::EnclavePrimary
+            }
+            LdrDllLoadReason::EnclaveDependency => {
+                ModuleLoadReason::EnclaveDependency
+            }
             LdrDllLoadReason::PatchImage => ModuleLoadReason::PatchImage,
         }
     }
@@ -585,7 +789,8 @@ mod tests {
 
     #[test]
     fn get_remote_module_export() -> Result<()> {
-        let process = Process::open_first_named("Discord.exe", ProcessAccess::ALL)?;
+        let process =
+            Process::open_first_named("Discord.exe", ProcessAccess::ALL)?;
         let ntdll = process
             .modules(ModuleIterOrder::Initialization)?
             .next()
@@ -595,15 +800,20 @@ mod tests {
         // NtWriteVirtualMemory bytes
         const EXPECTED_BYTES: [u8; 24] = [
             // 0xFF is where the syscall number is
-            0x4c, 0x8b, 0xd1, 0xb8, 0xFF, 0x00, 0x00, 0x00, 0xf6, 0x04, 0x25, 0x08, 0x03, 0xfe,
-            0x7f, 0x01, 0x75, 0x03, 0x0f, 0x05, 0xc3, 0xcd, 0x2e, 0xc3,
+            0x4c, 0x8b, 0xd1, 0xb8, 0xFF, 0x00, 0x00, 0x00, 0xf6, 0x04,
+            0x25, 0x08, 0x03, 0xfe, 0x7f, 0x01, 0x75, 0x03, 0x0f, 0x05,
+            0xc3, 0xcd, 0x2e, 0xc3,
         ];
 
-        let base_address = ntdll.get_export("NtWriteVirtualMemory")?;
-        let fn_bytes = process.read_slice::<u8>(base_address, EXPECTED_BYTES.len())?;
+        let base_address =
+            ntdll.get_proc_address("NtWriteVirtualMemory")?;
+        let fn_bytes = process
+            .read_slice::<u8>(base_address, EXPECTED_BYTES.len())?;
 
         // match NtWriteVirtualMemory bytes
-        for (&expected, &byte) in EXPECTED_BYTES.iter().zip(fn_bytes.iter()) {
+        for (&expected, &byte) in
+            EXPECTED_BYTES.iter().zip(fn_bytes.iter())
+        {
             if expected == 0xFF {
                 // ignore syscall number because they can differ between versions
                 continue;
@@ -620,7 +830,8 @@ mod tests {
 
     #[test]
     fn get_remote_module_sections() -> Result<()> {
-        let process = Process::open_first_named("Discord.exe", ProcessAccess::ALL)?;
+        let process =
+            Process::open_first_named("Discord.exe", ProcessAccess::ALL)?;
         let ntdll = process
             .modules(ModuleIterOrder::Initialization)?
             .next()
@@ -647,7 +858,8 @@ mod tests {
 
         assert!(!imports.is_empty(), "no imports found for kernel32.dll");
 
-        let ntdll_imports = imports.iter().find(|import| import.dll_name == "ntdll.dll");
+        let ntdll_imports =
+            imports.iter().find(|import| import.dll_name == "ntdll.dll");
         assert!(
             ntdll_imports.is_some(),
             "ntdll.dll not found in kernel32.dll imports"
@@ -669,8 +881,8 @@ mod tests {
         let kernel32 = process.get_module("kernel32.dll")?;
         let ntdll = process.get_module("ntdll.dll")?;
 
-        let forwarded_address = kernel32.get_export("HeapAlloc")?;
-        let address = ntdll.get_export("RtlAllocateHeap")?;
+        let forwarded_address = kernel32.get_proc_address("HeapAlloc")?;
+        let address = ntdll.get_proc_address("RtlAllocateHeap")?;
 
         assert_eq!(
             forwarded_address, address,

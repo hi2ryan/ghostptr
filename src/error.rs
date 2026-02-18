@@ -14,8 +14,7 @@ pub enum ProcessError {
 
     // modules
     MalformedPE,
-    ForwardDepthExceeded,
-    InvalidForwarderName(String),
+    NoExportDirectory,
 
     // ..NotFound's
     ProcessNotFound(String),
@@ -52,10 +51,8 @@ impl Display for ProcessError {
 			// modules
 			ProcessError::MalformedPE =>
 				write!(f, "Malformed PE format"),
-			ProcessError::ForwardDepthExceeded =>
-				write!(f, "Exceeded recursive maximum forwarded export depth"),
-			ProcessError::InvalidForwarderName(name) =>
-				write!(f, "Invalid forwarder name: '{name}'"),
+			ProcessError::NoExportDirectory =>
+				write!(f, "No export directory"),
 
 			// ..NotFound's
 			ProcessError::ProcessNotFound(name) =>

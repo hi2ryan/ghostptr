@@ -2,7 +2,7 @@ use crate::{
     Module, Result,
     process::Process,
     windows::{
-        structs::{LdrModule, ListEntry, PebLoaderData, ProcessEnvBlock},
+        structs::{LoaderDataTableEntry, ListEntry, PebLoaderData, ProcessEnvBlock},
         utils::query_process_basic_info,
     },
 };
@@ -74,18 +74,18 @@ impl<'process> Iterator for ModuleIterator<'process> {
         }
 
         let offset = match self.order {
-            ModuleIterOrder::Load => offset_of!(LdrModule, in_load_order_module_list),
+            ModuleIterOrder::Load => offset_of!(LoaderDataTableEntry, in_load_order_module_list),
             ModuleIterOrder::Memory => {
-                offset_of!(LdrModule, in_memory_order_module_list)
+                offset_of!(LoaderDataTableEntry, in_memory_order_module_list)
             }
             ModuleIterOrder::Initialization => {
-                offset_of!(LdrModule, in_initialization_order_module_list)
+                offset_of!(LoaderDataTableEntry, in_initialization_order_module_list)
             }
         };
-        let entry = (current as usize - offset) as *const LdrModule;
+        let entry = (current as usize - offset) as *const LoaderDataTableEntry;
 
         // read module
-        let module: LdrModule = self.process.read_mem(entry).expect("failed to read mem");
+        let module: LoaderDataTableEntry = self.process.read_mem(entry).expect("failed to read mem");
 
         // update next entry
         self.next = match self.order {

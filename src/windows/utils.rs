@@ -4,7 +4,7 @@ use crate::windows::constants::{
     STATUS_BUFFER_TOO_SMALL, STATUS_INFO_LENGTH_MISMATCH,
 };
 use crate::windows::structs::{
-    ImageDosHeader, ImageExportDirectory, ImageNtHeaders64, LdrModule,
+    ImageDosHeader, ImageExportDirectory, ImageNtHeaders64, LoaderDataTableEntry,
     ProcessBasicInformation, UnicodeString,
 };
 use crate::windows::wrappers::nt_query_information_process;
@@ -39,10 +39,6 @@ pub fn unicode_to_string(u: &UnicodeString) -> String {
 pub fn get_module_base(name: &str) -> Option<*const u8> {
     unsafe {
         let peb = get_peb();
-        if peb.is_null() || (*peb).ldr.is_null() {
-            return None;
-        }
-
         let ldr = (*peb).ldr;
 
         let head = &(*ldr).in_memory_order_module_list;
@@ -51,9 +47,9 @@ pub fn get_module_base(name: &str) -> Option<*const u8> {
         while current != head {
             let entry = (current as usize
                 - core::mem::offset_of!(
-                    LdrModule,
+                    LoaderDataTableEntry,
                     in_memory_order_module_list
-                )) as *const LdrModule;
+                )) as *const LoaderDataTableEntry;
             let dll_name = unicode_to_string(&(*entry).base_dll_name);
 
             if dll_name.eq_ignore_ascii_case(name) {

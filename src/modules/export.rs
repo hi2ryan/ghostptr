@@ -3,12 +3,16 @@ use core::ops::Range;
 use super::Module;
 use crate::error::Result;
 
-/// Represents an exported symbol from a PE module's Export Address Table.
+#[allow(unused_imports)]
+use crate::error::ProcessError;
+
+/// Represents an exported symbol from a PE module's EAT (Export Address Table).
 ///
 /// Exports can be:
 /// - Named
 /// - Ordinal-only (no name)
-/// - Forwarded to another module
+/// - Forwarded to another module (however, the export's forwarded
+///   address will be resolved)
 #[derive(Debug, Clone)]
 pub struct Export {
     /// The name of the exported symbol, if present.
@@ -20,12 +24,40 @@ pub struct Export {
     /// The resolved virtual address of the exported function.
     pub address: usize,
 
-    /// If this export was forwarded, contains the forwarder string.
-    ///
-    /// (e.g. "NTDLL.RtlAllocateHeap")
-    pub forwarder: Option<String>,
+    /// Data pertaining to how the export was forwarded.
+    /// [`None`] if the export was not forwarded.
+    pub forwarder: Option<ExportForwarder>,
 }
 
+/// Represents information about a forwarded export.
+#[derive(Debug, Clone)]
+pub struct ExportForwarder {
+    /// The module forwarded to.
+    ///
+    /// e.g. `"ntdll.dll"`
+    pub dll: String,
+
+    /// The export forwarded to.
+    ///
+    /// e.g. `ForwardedBy::Name("RtlProtectHeap")`
+    /// or `ForwardedBy::Ordinal(24)`
+    pub export: ForwardedBy,
+}
+
+/// The method used in forwarding an export.
+///
+/// e.g. `ForwardedBy::Name("RtlProtectHeap")`
+/// or `ForwardedBy::Ordinal(24)`
+#[derive(Debug, Clone)]
+pub enum ForwardedBy {
+    /// Forwarded by ordinal.
+    Ordinal(u16),
+
+    /// Forwarded by name.
+    Name(String),
+}
+
+/// An iterator over all exports from a module.
 pub struct ExportIterator<'process, 'module> {
     module: &'module Module<'process>,
     export_directory_range: Range<u32>,
@@ -39,13 +71,30 @@ pub struct ExportIterator<'process, 'module> {
 }
 
 impl<'process, 'module> ExportIterator<'process, 'module> {
+    /// Creates a [`ExportIterator`] over all exports from [`Module`] `module`
+    ///
+    /// # Arguments
+    /// - `module` The module to parse exports from.
+	///
+	/// Parses the PE headers in the target process, walks the export
+    /// directory, and returns a list of [`Export`] entries. Both named and
+    /// ordinal-only exports are included.
+    ///
+    /// # Errors
+    /// - [`ProcessError::MalformedPE`] if the module appears to have
+	///   invalid PE headers.
+	/// - [`ProcessError::NoExportDirectory`] if the module appears to have no
+    ///   export directory (rva = 0).
+    /// - [`ProcessError::NtStatus`] if reading memory fails.
     pub fn new(module: &'module Module<'process>) -> Result<Self> {
-        let (export_data_dir, export_directory) = module.export_directory()?;
-        let (names, ordinals, functions) = module.resolve_exports(export_directory)?;
+        // parse exports
+        let (export_data_dir, export_directory) =
+            module.export_directory()?;
+        let (names, ordinals, functions) =
+            module.resolve_exports(&export_directory)?;
 
         let export_directory_range = export_data_dir.virtual_address
             ..(export_data_dir.virtual_address + export_data_dir.size);
-
         let ordinal_base = export_directory.base as u16;
 
         Ok(Self {
@@ -61,23 +110,13 @@ impl<'process, 'module> ExportIterator<'process, 'module> {
         })
     }
 
+    /// Checks whether an export's RVA is forwarded.
+    ///
+    /// # Arguments
+    /// - `rva` The export's RVA to check.
     #[inline(always)]
     pub(crate) fn is_forwarded(&self, rva: u32) -> bool {
         self.export_directory_range.contains(&rva)
-    }
-
-    pub(crate) fn find_by_forwarder(&mut self, name: &str) -> Option<Export> {
-        if let Some(ordinal_str) = name.strip_prefix("#") {
-            let ordinal: u16 = ordinal_str.parse().ok()?;
-            self.find(|export| export.ordinal == ordinal)
-        } else {
-            self.find(|export| {
-                export
-                    .name
-                    .as_ref()
-                    .is_some_and(|export_name| export_name == name)
-            })
-        }
     }
 }
 
@@ -101,7 +140,7 @@ impl<'process, 'module> Iterator for ExportIterator<'process, 'module> {
 
         // resolve ordinal & VA
         let ordinal = self.ordinal_base + self.idx as u16;
-        let mut address = self.module.base_address + func_rva as usize;
+        let address = self.module.base_address + func_rva as usize;
 
         // get export name (if it exists)
         let name = self
@@ -120,71 +159,51 @@ impl<'process, 'module> Iterator for ExportIterator<'process, 'module> {
                 self.module.process.read_c_string(name_va, None).ok()
             });
 
-        // check if its forwarded
-        let mut is_forward = self.is_forwarded(func_rva);
-        let mut forwarder = None;
-
-        // resolve forwarder chain
-        while is_forward {
-            // read forwarder string; format: NTDLL.RtlAllocateHeap
-            let forwarder_str = match self.module.process.read_c_string(address, None) {
-                Ok(s) => s,
-                Err(_) => break,
-            };
-
-            if forwarder.is_none() {
-                // store first forwarder string
-                forwarder = Some(forwarder_str.clone());
-            }
-
-            if let Some(dot) = forwarder_str.rfind('.') {
-                // read forwarder
-                let module_str = &forwarder_str[..dot];
-                if module_str.to_lowercase().starts_with("api-")
-                    || module_str.to_lowercase().starts_with("ext-")
-                {
-					// TODO: implement parsing PEB->ApiSetMap
-					// to resolve forwarded module
-                    break;
-                }
-
-                let mut module_name = module_str.to_owned();
-                let export_name = &forwarder_str[dot + 1..];
-
-                // add .dll extension so we can find the module
-                module_name.push_str(".dll");
-
-                // find imported module
-                let imported_module = match self.module.process.get_module(&module_name) {
-                    Ok(module) => module,
-                    Err(_) => break,
-                };
-
-                let mut exports = match imported_module.exports() {
-                    Ok(exports) => exports,
-                    Err(_) => break,
-                };
-
-                // find forwarded export
-                match exports.find_by_forwarder(export_name) {
-                    Some(forwarded_export) => {
-                        address = forwarded_export.address;
-                        let new_rva = (address - imported_module.base_address) as u32;
-                        is_forward = exports.is_forwarded(new_rva);
-                    }
-                    None => break,
-                }
-            } else {
-                break;
-            }
-        }
-
-        self.idx += 1;
-        Some(Export {
+        // build export
+        let mut export = Export {
             name,
             ordinal,
             address,
-            forwarder,
-        })
+            forwarder: None,
+        };
+
+        // check if its forwarded
+        if self.is_forwarded(func_rva)
+            && let Some((forwarder, address)) =
+                self.module.resolve_forwarded_export(address)
+        {
+            // update export
+            export.forwarder = Some(forwarder);
+            export.address = address;
+        }
+
+        self.idx += 1;
+        Some(export)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::*;
+
+    #[test]
+    fn test_iter_exports() -> Result<()> {
+        let process = Process::current();
+        let module = process.get_module("kernel32.dll")?;
+
+        const FORWARDED_NAME: &str = "AcquireSRWLockExclusive";
+
+        assert!(
+            module
+                .exports()?
+                .filter(|export| export.forwarder.is_some())
+                .any(|export| export
+                    .name
+                    .as_ref()
+                    .is_some_and(|name| name == FORWARDED_NAME)),
+            "failed to find forwarded export through iterating exports"
+        );
+
+        Ok(())
     }
 }

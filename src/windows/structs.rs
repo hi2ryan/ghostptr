@@ -19,7 +19,7 @@ pub struct UnicodeString {
 
 #[repr(C)]
 #[derive(Clone, Copy)]
-pub struct LdrModule {
+pub struct LoaderDataTableEntry {
     pub in_load_order_module_list: ListEntry,
     pub in_memory_order_module_list: ListEntry,
     pub in_initialization_order_module_list: ListEntry,
