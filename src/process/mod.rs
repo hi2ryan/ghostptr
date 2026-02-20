@@ -71,7 +71,7 @@ impl Process {
     /// Creates a [`Process`] struct using
     /// current process pseudo handle (`-1`)
     #[inline(always)]
-    pub fn current() -> Self {
+    pub const fn current() -> Self {
         Self::CURRENT
     }
 

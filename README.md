@@ -14,7 +14,7 @@ The purpose of this library is to provide simple, minimal abstractions over Wind
 
 ```toml
 [dependencies]
-ghostptr = "0.2.4"
+ghostptr = "0.2.5"
 ```
 
 ## Quick Start

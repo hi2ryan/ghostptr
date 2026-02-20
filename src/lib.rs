@@ -17,8 +17,8 @@
 #[cfg(not(docsrs))]
 compile_error!("ghostptr only works for win64 atm");
 
-mod constants;
-mod windows;
+pub(crate) mod constants;
+pub(crate) mod windows;
 
 pub mod error;
 pub mod iter;
@@ -26,6 +26,9 @@ pub mod modules;
 pub mod patterns;
 pub mod process;
 pub mod utils;
+
+#[cfg(feature = "expose_syscalls")]
+pub use windows::syscalls::{syscalls, extract_syscall_id};
 
 #[cfg(feature = "vectored_handlers")]
 pub mod vectored_handlers;

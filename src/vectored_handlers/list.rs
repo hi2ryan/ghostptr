@@ -1,7 +1,8 @@
 use core::mem::offset_of;
 
 use crate::{
-    AllocationType, MemoryProtection, Process, ProcessError,
+    AllocationType, MemoryProtection, ModuleIterOrder, Process,
+    ProcessError,
     error::Result,
     vectored_handlers::{
         handler_type::VectoredHandlerType,
@@ -65,7 +66,12 @@ impl<'process> VectoredHandlerList<'process> {
     /// Returns [`ProcessError::NtStatus`] if reading or querying
     /// the process' ntdll.dll or cookie fails, potentially due to insufficient access.
     pub fn new(process: &'process Process) -> Result<Self> {
-        let ntdll = process.get_module("ntdll.dll")?;
+		// ntdll is guaranteed to be the first module in the initialization order list
+        let ntdll = process
+            .modules(ModuleIterOrder::Initialization)?
+            .next()
+            .unwrap();
+		
         let raw_list = ntdll.offset(vector_handler_list_offset())
             as *const RtlVectorHandlerList;
         let cookie = process.cookie()?;
@@ -86,14 +92,14 @@ impl<'process> VectoredHandlerList<'process> {
     /// - `handler_addr` The address of the vectored handler function.
     /// - `first` Whether to add the entry to the head of the list or the tail.
     ///
-	/// # Access Rights
+    /// # Access Rights
     ///
     /// If this is a remote process,
     /// this method requires the process handle access mask to include:
     ///
     /// - [`ProcessAccess::VM_READ`],
     /// - [`ProcessAccess::VM_WRITE`],
-	/// - [`ProcessAccess::VM_OPERATION`] **and**
+    /// - [`ProcessAccess::VM_OPERATION`] **and**
     /// - [`ProcessAccess::QUERY_INFORMATION`] **or** [`ProcessAccess::QUERY_LIMITED_INFORMATION`]
     ///
     /// # Errors
@@ -213,7 +219,7 @@ impl<'process> VectoredHandlerList<'process> {
         Ok(())
     }
 
-	/// Adds a vectored handler entry to the head of the process' list.
+    /// Adds a vectored handler entry to the head of the process' list.
     ///
     /// # Arguments
     /// - `handler_type` The type of handler to add.
@@ -228,13 +234,13 @@ impl<'process> VectoredHandlerList<'process> {
     ///
     /// - [`ProcessAccess::VM_READ`],
     /// - [`ProcessAccess::VM_WRITE`],
-	/// - [`ProcessAccess::VM_OPERATION`] **and**
+    /// - [`ProcessAccess::VM_OPERATION`] **and**
     /// - [`ProcessAccess::QUERY_INFORMATION`] **or** [`ProcessAccess::QUERY_LIMITED_INFORMATION`]
     ///
     /// # Errors
     ///
     /// Returns [`ProcessError::NtStatus`] if reading, protecting, or writing memory fails.
-	#[inline(always)]
+    #[inline(always)]
     pub fn add_first(
         &self,
         handler_type: VectoredHandlerType,
@@ -244,7 +250,7 @@ impl<'process> VectoredHandlerList<'process> {
         self.add(handler_type, addresses, handler_addr, true)
     }
 
-	/// Adds a vectored handler entry to the tail of the process' list.
+    /// Adds a vectored handler entry to the tail of the process' list.
     ///
     /// # Arguments
     /// - `handler_type` The type of handler to add.
@@ -259,13 +265,13 @@ impl<'process> VectoredHandlerList<'process> {
     ///
     /// - [`ProcessAccess::VM_READ`],
     /// - [`ProcessAccess::VM_WRITE`],
-	/// - [`ProcessAccess::VM_OPERATION`] **and**
+    /// - [`ProcessAccess::VM_OPERATION`] **and**
     /// - [`ProcessAccess::QUERY_INFORMATION`] **or** [`ProcessAccess::QUERY_LIMITED_INFORMATION`]
     ///
     /// # Errors
     ///
     /// Returns [`ProcessError::NtStatus`] if reading, protecting, or writing memory fails.
-	#[inline(always)]
+    #[inline(always)]
     pub fn add_last(
         &self,
         handler_type: VectoredHandlerType,

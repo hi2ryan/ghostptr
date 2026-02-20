@@ -6,7 +6,7 @@ use crate::{
     process::Process,
     windows::{
         flags::MemoryProtection,
-        utils::{get_export, get_module_base},
+        utils::{fnv1a_hash, get_export_by_hash, get_ntdll_base},
     },
 };
 
@@ -21,9 +21,12 @@ static VECTOR_HANDLER_LIST_OFFSET: OnceLock<usize> = OnceLock::new();
 pub fn vector_handler_list_offset() -> usize {
     *VECTOR_HANDLER_LIST_OFFSET.get_or_init(|| {
         // get RtlAddVectoredExceptionHandler address
-        let ntdll = get_module_base("ntdll.dll").unwrap();
-        let add_fn_addr =
-            get_export(ntdll, "RtlAddVectoredExceptionHandler").unwrap();
+        let ntdll = get_ntdll_base();
+        let add_fn_addr = get_export_by_hash(
+            ntdll,
+            fnv1a_hash(b"RtlAddVectoredExceptionHandler"),
+        )
+        .unwrap();
 
         // read RtlpAddVectoredHandler function base address
         let rtlp_add_vectored_handler = unsafe {

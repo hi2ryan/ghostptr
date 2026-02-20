@@ -4,8 +4,8 @@ use crate::windows::constants::{
     STATUS_BUFFER_TOO_SMALL, STATUS_INFO_LENGTH_MISMATCH,
 };
 use crate::windows::structs::{
-    ImageDosHeader, ImageExportDirectory, ImageNtHeaders64, LoaderDataTableEntry,
-    ProcessBasicInformation, UnicodeString,
+    ImageDosHeader, ImageExportDirectory, ImageNtHeaders64,
+    LoaderDataTableEntry, ProcessBasicInformation, UnicodeString,
 };
 use crate::windows::wrappers::nt_query_information_process;
 use core::arch::asm;
@@ -36,33 +36,31 @@ pub fn unicode_to_string(u: &UnicodeString) -> String {
     String::from_utf16_lossy(slice)
 }
 
-pub fn get_module_base(name: &str) -> Option<*const u8> {
+/// Retrieves the base address of ntdll.dll by
+/// traversing the PEB's InInitializationOrderModuleList,
+/// which is guaranteed to have ntdll.dll as the first entry.
+pub fn get_ntdll_base() -> *const u8 {
     unsafe {
         let peb = get_peb();
         let ldr = (*peb).ldr;
 
-        let head = &(*ldr).in_memory_order_module_list;
-        let mut current = head.next;
+        let head = &(*ldr).in_initialization_order_module_list;
+        let ntdll_entry = head.next;
 
-        while current != head {
-            let entry = (current as usize
-                - core::mem::offset_of!(
-                    LoaderDataTableEntry,
-                    in_memory_order_module_list
-                )) as *const LoaderDataTableEntry;
-            let dll_name = unicode_to_string(&(*entry).base_dll_name);
+        let entry = (ntdll_entry as usize
+            - core::mem::offset_of!(
+                LoaderDataTableEntry,
+                in_initialization_order_module_list
+            )) as *const LoaderDataTableEntry;
 
-            if dll_name.eq_ignore_ascii_case(name) {
-                return Some((*entry).base_address);
-            }
-            current = (*current).next;
-        }
-
-        None
+        (*entry).base_address
     }
 }
 
-pub fn get_export(base: *const u8, name: &str) -> Option<*const u8> {
+pub fn get_export_by_hash(
+    base: *const u8,
+    hash: u32,
+) -> Option<*const u8> {
     unsafe {
         let dos_header = base.cast::<ImageDosHeader>();
         let nt_headers = dos_header
@@ -91,17 +89,13 @@ pub fn get_export(base: *const u8, name: &str) -> Option<*const u8> {
             .add((*export_dir).address_of_functions as usize)
             .cast::<u32>();
 
-        let name_bytes = name.as_bytes();
         for i in 0..number_of_names {
             let name_rva = *address_of_names.add(i as usize);
             let name_ptr = base.add(name_rva as usize);
 
             let export_name = core::ffi::CStr::from_ptr(name_ptr.cast());
-            // if name=="NtOpenProcess" {
-            // 	println!("{:?}", export_name.to_bytes());
-            // 	println!("{:?}", name_bytes);
-            // }
-            if export_name.to_bytes() == name_bytes {
+            let export_hash = fnv1a_hash(export_name.to_bytes());
+            if export_hash == hash {
                 let ordinal_index =
                     *address_of_name_ordinals.add(i as usize) as usize;
                 let func_rva = *address_of_functions.add(ordinal_index);
@@ -166,4 +160,15 @@ pub fn query_process_handle_info(handle: Handle) -> Result<Vec<u8>> {
             _ => return Err(ProcessError::NtStatus(status)),
         }
     }
+}
+
+pub const fn fnv1a_hash(bytes: &[u8]) -> u32 {
+    let mut hash = 0x811C9DC5u32;
+    let mut i = 0;
+    while i < bytes.len() {
+        hash ^= bytes[i] as u32;
+        hash = hash.wrapping_mul(0x01000193);
+        i += 1;
+    }
+    hash
 }

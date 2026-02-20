@@ -1,14 +1,12 @@
 use std::sync::LazyLock;
 
-use crate::windows::utils::{get_export, get_module_base};
+use crate::windows::utils::{get_export_by_hash, get_ntdll_base};
 
-// static NTDLL_BASE: OnceLock<usize> = OnceLock::new();
-static NTDLL_BASE: LazyLock<usize> = LazyLock::new(|| {
-    get_module_base("ntdll.dll").expect("ntdll.dll not found") as usize
-});
-// static SYSCALLS: OnceLock<Syscalls> = OnceLock::new();
+static NTDLL_BASE: LazyLock<usize> =
+    LazyLock::new(|| get_ntdll_base() as usize);
 static SYSCALLS: LazyLock<Syscalls> = LazyLock::new(Syscalls::resolve);
 
+/// Returns a reference to the resolved syscalls' IDs.
 #[inline(always)]
 pub fn syscalls() -> &'static Syscalls {
     &SYSCALLS
@@ -23,7 +21,7 @@ macro_rules! syscalls {
         impl Syscalls {
             pub fn resolve() -> Self {
                 Self {
-                    $($field: get_syscall_id($name).expect($name),)*
+                    $($field: get_syscall_id($crate::windows::utils::fnv1a_hash($name.as_bytes())).unwrap(),)*
                 }
             }
         }
@@ -65,16 +63,25 @@ syscalls! {
     nt_close => "NtClose",
 }
 
-fn get_syscall_id(name: &str) -> Option<u32> {
-    get_export(*NTDLL_BASE as _, name).map(extract_syscall_id)?
+fn get_syscall_id(hash: u32) -> Option<u32> {
+    get_export_by_hash(*NTDLL_BASE as _, hash).map(extract_syscall_id)?
 }
 
+/// Extracts the syscall ID from the function's prologue.
+///
+/// # Safety
+/// The caller must ensure that `func` points to a valid syscall stub.
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[inline(always)]
-fn extract_syscall_id(func: *const u8) -> Option<u32> {
+pub fn extract_syscall_id(func: *const u8) -> Option<u32> {
     unsafe {
-        // look for:
-        // mov r10, rcx; mov eax, imm32
-        if *func.add(3) == 0xB8 {
+        // mov r10, rcx
+		// mov eax, imm32
+        if *func == 0x4C
+            && *func.add(1) == 0x8B
+            && *func.add(2) == 0xD1
+            && *func.add(3) == 0xB8
+        {
             Some(*(func.add(4) as *const u32))
         } else {
             None
