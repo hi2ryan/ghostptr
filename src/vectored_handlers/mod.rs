@@ -10,7 +10,8 @@ pub use iterator::VectoredHandlerIterator;
 pub mod list;
 pub use list::VectoredHandlerList;
 
-mod utils;
+pub mod utils;
+pub use utils::{decode_pointer, encode_pointer};
 
 #[cfg(test)]
 mod tests {
@@ -88,7 +89,8 @@ mod tests {
         let process = Process::current();
         let handlers = process.vectored_handlers()?;
 
-        const STATUS_ACCESS_VIOLATION: NtStatus = 0xC0000005u32 as NtStatus;
+        const STATUS_ACCESS_VIOLATION: NtStatus =
+            0xC0000005u32 as NtStatus;
 
         extern "system" fn first_handler(
             exception_info_ptr: *mut ExceptionPointers,
@@ -103,7 +105,7 @@ mod tests {
                     "exception code isn't STATUS_ACCESS_VIOLATION"
                 );
 
-				// skip the instruction
+                // skip the instruction
                 context.rip += 2;
             }
             ExceptionHandler::ContinueSearch

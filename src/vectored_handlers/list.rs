@@ -42,7 +42,7 @@ pub struct HandlerEntryAddresses {
 pub struct VectoredHandlerList<'process> {
     pub(crate) process: &'process Process,
     pub(crate) raw_list: *const RtlVectorHandlerList,
-    pub(crate) cookie: u32,
+    pub cookie: u32,
 }
 
 impl<'process> VectoredHandlerList<'process> {
@@ -59,9 +59,6 @@ impl<'process> VectoredHandlerList<'process> {
     /// - [`ProcessAccess::VM_READ`],
     /// - [`ProcessAccess::VM_WRITE`], **and**
     /// - [`ProcessAccess::QUERY_INFORMATION`] **or** [`ProcessAccess::QUERY_LIMITED_INFORMATION`]
-    ///
-    /// Without this right, the system call will fail with an
-    /// `NTSTATUS` error.
     ///
     /// # Errors
     ///
@@ -89,9 +86,19 @@ impl<'process> VectoredHandlerList<'process> {
     /// - `handler_addr` The address of the vectored handler function.
     /// - `first` Whether to add the entry to the head of the list or the tail.
     ///
+	/// # Access Rights
+    ///
+    /// If this is a remote process,
+    /// this method requires the process handle access mask to include:
+    ///
+    /// - [`ProcessAccess::VM_READ`],
+    /// - [`ProcessAccess::VM_WRITE`],
+	/// - [`ProcessAccess::VM_OPERATION`] **and**
+    /// - [`ProcessAccess::QUERY_INFORMATION`] **or** [`ProcessAccess::QUERY_LIMITED_INFORMATION`]
+    ///
     /// # Errors
     ///
-    /// Returns [`ProcessError::NtStatus`] if reading or writing memory fails.
+    /// Returns [`ProcessError::NtStatus`] if reading, protecting, or writing memory fails.
     pub fn add(
         &self,
         handler_type: VectoredHandlerType,
@@ -214,9 +221,19 @@ impl<'process> VectoredHandlerList<'process> {
     ///   data structures and appending to the list.
     /// - `handler_addr` The address of the vectored handler function.
     ///
+    /// # Access Rights
+    ///
+    /// If this is a remote process,
+    /// this method requires the process handle access mask to include:
+    ///
+    /// - [`ProcessAccess::VM_READ`],
+    /// - [`ProcessAccess::VM_WRITE`],
+	/// - [`ProcessAccess::VM_OPERATION`] **and**
+    /// - [`ProcessAccess::QUERY_INFORMATION`] **or** [`ProcessAccess::QUERY_LIMITED_INFORMATION`]
+    ///
     /// # Errors
     ///
-    /// Returns [`ProcessError::NtStatus`] if reading or writing memory fails.
+    /// Returns [`ProcessError::NtStatus`] if reading, protecting, or writing memory fails.
 	#[inline(always)]
     pub fn add_first(
         &self,
@@ -235,9 +252,19 @@ impl<'process> VectoredHandlerList<'process> {
     ///   data structures and appending to the list.
     /// - `handler_addr` The address of the vectored handler function.
     ///
+    /// # Access Rights
+    ///
+    /// If this is a remote process,
+    /// this method requires the process handle access mask to include:
+    ///
+    /// - [`ProcessAccess::VM_READ`],
+    /// - [`ProcessAccess::VM_WRITE`],
+	/// - [`ProcessAccess::VM_OPERATION`] **and**
+    /// - [`ProcessAccess::QUERY_INFORMATION`] **or** [`ProcessAccess::QUERY_LIMITED_INFORMATION`]
+    ///
     /// # Errors
     ///
-    /// Returns [`ProcessError::NtStatus`] if reading or writing memory fails.
+    /// Returns [`ProcessError::NtStatus`] if reading, protecting, or writing memory fails.
 	#[inline(always)]
     pub fn add_last(
         &self,

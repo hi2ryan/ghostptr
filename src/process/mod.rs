@@ -1207,7 +1207,24 @@ impl Process {
         Ok(String::from_utf16_lossy(&buf))
     }
 
-    pub(crate) fn cookie(&self) -> Result<u32> {
+	 /// Queries the process's cookie value.
+    ///
+    /// # Access Rights
+    ///
+    /// If this is a remote process,
+    /// this method requires the process handle access mask to include:
+    ///
+    /// - [`ProcessAccess::VM_WRITE`], **and**
+    /// - [`ProcessAccess::QUERY_INFORMATION`] **or** [`ProcessAccess::QUERY_LIMITED_INFORMATION`]
+    ///
+    /// Without this right, the system call will fail with an
+    /// `NTSTATUS` error.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ProcessError::NtStatus`] if reading or
+    /// querying the cookie fails, potentially due to insufficient access rights.
+    pub fn cookie(&self) -> Result<u32> {
         let mut cookie = 0u32;
         let status = nt_query_information_process(
             self.0,

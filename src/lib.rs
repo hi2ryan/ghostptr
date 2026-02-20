@@ -61,7 +61,7 @@ pub use windows::{
 #[cfg(feature = "vectored_handlers")]
 pub use vectored_handlers::{
     VectoredHandlerEntry, VectoredHandlerIterator, VectoredHandlerList,
-    VectoredHandlerType,
+    VectoredHandlerType, decode_pointer, encode_pointer,
 };
 
 #[cfg(feature = "vectored_handlers")]

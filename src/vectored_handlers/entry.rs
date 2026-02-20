@@ -13,12 +13,15 @@ use crate::{
     },
 };
 
+#[allow(unused_imports)]
+use crate::{windows::flags::ProcessAccess, error::ProcessError};
+
 #[derive(Clone)]
 pub struct VectoredHandlerEntry<'process, 'list> {
     list: &'list VectoredHandlerList<'process>,
-    raw_entry: *const RtlVectorHandlerEntry,
     handler_address: usize,
 
+    pub raw_entry: *const RtlVectorHandlerEntry,
     pub handler_type: VectoredHandlerType,
 }
 
@@ -43,6 +46,20 @@ impl<'process, 'list> VectoredHandlerEntry<'process, 'list> {
 	///
 	/// # Arguments
 	/// `handler` The new vectored handler to set.
+	///
+	/// # Access Rights
+    ///
+    /// If this is a remote process,
+    /// this method requires the process handle access mask to include:
+    ///
+    /// - [`ProcessAccess::VM_READ`],
+    /// - [`ProcessAccess::VM_WRITE`],
+	/// - [`ProcessAccess::VM_OPERATION`] **and**
+    /// - [`ProcessAccess::QUERY_INFORMATION`] **or** [`ProcessAccess::QUERY_LIMITED_INFORMATION`]
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ProcessError::NtStatus`] if reading, protecting, or writing memory fails.
     pub fn set_handler(
         &self,
         handler: VectoredExceptionHandler,
@@ -83,6 +100,20 @@ impl<'process, 'list> VectoredHandlerEntry<'process, 'list> {
 	///
 	/// # Arguments
 	/// - `free_entry` Frees the memory allocated to the internal RtlVectorHandlerEntry
+	///
+	/// # Access Rights
+    ///
+    /// If this is a remote process,
+    /// this method requires the process handle access mask to include:
+    ///
+    /// - [`ProcessAccess::VM_READ`],
+    /// - [`ProcessAccess::VM_WRITE`],
+	/// - [`ProcessAccess::VM_OPERATION`] **and**
+    /// - [`ProcessAccess::QUERY_INFORMATION`] **or** [`ProcessAccess::QUERY_LIMITED_INFORMATION`]
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ProcessError::NtStatus`] if reading, protecting, or writing memory fails.
     pub fn remove(&self, free_entry: bool) -> Result<()> {
         let process = self.list.process;
         let head_addr = self.list.list_head_addr(self.handler_type);
