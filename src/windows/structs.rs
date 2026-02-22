@@ -689,7 +689,7 @@ pub struct SRWLock {
 
 #[repr(C)]
 #[derive(Clone, Copy)]
-pub struct RtlVectorHandlerList {
+pub struct RtlVectoredHandlerList {
     pub veh_lock: *const SRWLock,
     pub veh_list: ListEntry,
 
@@ -699,7 +699,7 @@ pub struct RtlVectorHandlerList {
 
 #[repr(C)]
 #[derive(Clone, Copy)]
-pub struct RtlVectorHandlerEntry {
+pub struct RtlVectoredHandlerEntry {
     pub list: ListEntry,
     pub ref_count: *mut u64,
     pub zero: u32,

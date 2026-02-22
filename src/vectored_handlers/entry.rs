@@ -9,9 +9,11 @@ use crate::{
     },
     windows::{
         flags::FreeType,
-        structs::{ListEntry, RtlVectorHandlerEntry},
+        structs::{ListEntry, RtlVectoredHandlerEntry},
     },
 };
+
+pub type RawVectoredHandlerEntry = RtlVectoredHandlerEntry;
 
 #[allow(unused_imports)]
 use crate::{windows::flags::ProcessAccess, error::ProcessError};
@@ -21,7 +23,7 @@ pub struct VectoredHandlerEntry<'process, 'list> {
     list: &'list VectoredHandlerList<'process>,
     handler_address: usize,
 
-    pub raw_entry: *const RtlVectorHandlerEntry,
+    raw_entry: *const RawVectoredHandlerEntry,
     pub handler_type: VectoredHandlerType,
 }
 
@@ -70,7 +72,7 @@ impl<'process, 'list> VectoredHandlerEntry<'process, 'list> {
         protection_write(
             self.list.process,
             self.raw_entry as usize
-                + offset_of!(RtlVectorHandlerEntry, encoded_handler),
+                + offset_of!(RawVectoredHandlerEntry, encoded_handler),
             &encoded_handler,
         )
     }
@@ -83,7 +85,7 @@ impl<'process, 'list> VectoredHandlerEntry<'process, 'list> {
 	/// would be more performant due to handler address caching.
     pub fn read_handler(&self) -> Result<VectoredExceptionHandler> {
         let encoded_handler_addr = (self.raw_entry as usize)
-            + offset_of!(RtlVectorHandlerEntry, encoded_handler);
+            + offset_of!(RawVectoredHandlerEntry, encoded_handler);
         let encoded_handler: usize =
             self.list.process.read_mem(encoded_handler_addr)?;
 
@@ -120,7 +122,7 @@ impl<'process, 'list> VectoredHandlerEntry<'process, 'list> {
 
         let entry: ListEntry = process.read_mem(
             self.raw_entry as usize
-                + offset_of!(RtlVectorHandlerEntry, list),
+                + offset_of!(RawVectoredHandlerEntry, list),
         )?;
 
         let prev = entry.prev as usize;
@@ -131,7 +133,7 @@ impl<'process, 'list> VectoredHandlerEntry<'process, 'list> {
             // prev points to list head; update head's next
             head_addr + offset_of!(ListEntry, next)
         } else {
-            prev + offset_of!(RtlVectorHandlerEntry, list)
+            prev + offset_of!(RawVectoredHandlerEntry, list)
                 + offset_of!(ListEntry, next)
         };
         protection_write(process, prev_next_addr, &next)?;
@@ -141,7 +143,7 @@ impl<'process, 'list> VectoredHandlerEntry<'process, 'list> {
             // next points to list head; update head's tail
             head_addr + offset_of!(ListEntry, prev)
         } else {
-            next + offset_of!(RtlVectorHandlerEntry, list)
+            next + offset_of!(RawVectoredHandlerEntry, list)
                 + offset_of!(ListEntry, prev)
         };
         protection_write(process, next_prev_addr, &prev)?;
@@ -150,7 +152,7 @@ impl<'process, 'list> VectoredHandlerEntry<'process, 'list> {
 			// free the entry
             process.free_mem(
                 self.raw_entry as usize,
-                size_of::<RtlVectorHandlerEntry>(),
+                size_of::<RawVectoredHandlerEntry>(),
                 FreeType::RELEASE,
             )?;
         }
@@ -158,11 +160,17 @@ impl<'process, 'list> VectoredHandlerEntry<'process, 'list> {
         Ok(())
     }
 
+	/// Returns a pointer to the raw vectored handler entry.
+	#[inline(always)]
+	pub fn raw_entry(&self) -> *const RawVectoredHandlerEntry {
+		self.raw_entry
+	}
+
     #[inline(always)]
     pub(crate) fn from_raw_entry(
         list: &'list VectoredHandlerList<'process>,
         handler_type: VectoredHandlerType,
-        raw_entry: *const RtlVectorHandlerEntry,
+        raw_entry: *const RawVectoredHandlerEntry,
         handler_address: usize,
     ) -> Self {
         Self {

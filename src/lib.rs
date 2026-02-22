@@ -28,7 +28,7 @@ pub mod process;
 pub mod utils;
 
 #[cfg(feature = "expose_syscalls")]
-pub use windows::syscalls::{syscalls, extract_syscall_id};
+pub use windows::syscalls::{extract_syscall_id, syscalls};
 
 #[cfg(feature = "vectored_handlers")]
 pub mod vectored_handlers;
@@ -63,8 +63,9 @@ pub use windows::{
 
 #[cfg(feature = "vectored_handlers")]
 pub use vectored_handlers::{
-    VectoredHandlerEntry, VectoredHandlerIterator, VectoredHandlerList,
-    VectoredHandlerType, decode_pointer, encode_pointer,
+    RawVectoredHandlerEntry, RawVectoredHandlerList, VectoredHandlerEntry,
+    VectoredHandlerIterator, VectoredHandlerList, VectoredHandlerType,
+    decode_pointer, encode_pointer,
 };
 
 #[cfg(feature = "vectored_handlers")]

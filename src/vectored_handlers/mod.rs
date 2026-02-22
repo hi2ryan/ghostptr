@@ -2,13 +2,13 @@ pub mod handler_type;
 pub use handler_type::VectoredHandlerType;
 
 pub mod entry;
-pub use entry::VectoredHandlerEntry;
+pub use entry::{VectoredHandlerEntry, RawVectoredHandlerEntry};
 
 pub mod iterator;
 pub use iterator::VectoredHandlerIterator;
 
 pub mod list;
-pub use list::VectoredHandlerList;
+pub use list::{VectoredHandlerList, RawVectoredHandlerList};
 
 pub mod utils;
 pub use utils::{decode_pointer, encode_pointer};

@@ -7,6 +7,7 @@ use crate::{
     vectored_handlers::{
         handler_type::VectoredHandlerType,
         iterator::VectoredHandlerIterator,
+		entry::RawVectoredHandlerEntry,
         utils::{
             encode_pointer, protection_write, vector_handler_list_offset,
         },
@@ -14,10 +15,12 @@ use crate::{
     windows::{
         VectoredExceptionHandler,
         structs::{
-            ListEntry, RtlVectorHandlerEntry, RtlVectorHandlerList,
+            ListEntry, RtlVectoredHandlerList,
         },
     },
 };
+
+pub type RawVectoredHandlerList = RtlVectoredHandlerList;
 
 #[allow(unused_imports)]
 use crate::windows::flags::ProcessAccess;
@@ -42,8 +45,8 @@ pub struct HandlerEntryAddresses {
 /// Represents the vectored handlers in a process.
 pub struct VectoredHandlerList<'process> {
     pub(crate) process: &'process Process,
-    pub(crate) raw_list: *const RtlVectorHandlerList,
-    pub cookie: u32,
+    pub(crate) raw_list: *const RawVectoredHandlerList,
+    pub(crate) cookie: u32,
 }
 
 impl<'process> VectoredHandlerList<'process> {
@@ -71,9 +74,9 @@ impl<'process> VectoredHandlerList<'process> {
             .modules(ModuleIterOrder::Initialization)?
             .next()
             .unwrap();
-		
+
         let raw_list = ntdll.offset(vector_handler_list_offset())
-            as *const RtlVectorHandlerList;
+            as *const RawVectoredHandlerList;
         let cookie = process.cookie()?;
 
         Ok(Self {
@@ -119,7 +122,7 @@ impl<'process> VectoredHandlerList<'process> {
                 // fallback: allocate memory for the entry
                 let allocation = self.process.alloc_mem(
                     None,
-                    size_of::<RtlVectorHandlerEntry>(),
+                    size_of::<RawVectoredHandlerEntry>(),
                     AllocationType::COMMIT | AllocationType::RESERVE,
                     MemoryProtection::READWRITE,
                 )?;
@@ -155,7 +158,7 @@ impl<'process> VectoredHandlerList<'process> {
                 self.process.read_mem(head_addr)?;
 
             // create entry
-            let entry = RtlVectorHandlerEntry {
+            let entry = RawVectoredHandlerEntry {
                 list: ListEntry {
                     next: old_head_entry_addr as *const _, // point to old head
                     prev: head_addr as *const _, // point back to list head
@@ -174,7 +177,7 @@ impl<'process> VectoredHandlerList<'process> {
 
             // update old head's prev pointer to point to our new entry
             let old_head_prev_addr = old_head_entry_addr
-                + offset_of!(RtlVectorHandlerEntry, list)
+                + offset_of!(RawVectoredHandlerEntry, list)
                 + offset_of!(ListEntry, prev);
             protection_write(
                 self.process,
@@ -188,7 +191,7 @@ impl<'process> VectoredHandlerList<'process> {
                 self.process.read_mem(tail_addr)?;
 
             // create entry
-            let entry = RtlVectorHandlerEntry {
+            let entry = RawVectoredHandlerEntry {
                 list: ListEntry {
                     next: head_addr as *const _, // point to head
                     prev: old_tail_entry_addr as *const _, // point back to old tail
@@ -207,7 +210,7 @@ impl<'process> VectoredHandlerList<'process> {
 
             // update old tail's next pointer to point to our new entry
             let old_tail_next_addr = old_tail_entry_addr
-                + offset_of!(RtlVectorHandlerEntry, list)
+                + offset_of!(RawVectoredHandlerEntry, list)
                 + offset_of!(ListEntry, next);
             protection_write(
                 self.process,
@@ -321,16 +324,28 @@ impl<'process> VectoredHandlerList<'process> {
         VectoredHandlerIterator::new(self, handler_type)
     }
 
+	/// Returns the cached process cookie queried when the
+	/// [`VectoredHandlerList`] was initialized.
+	#[inline(always)]
+	pub fn cookie(&self) -> u32 {
+		self.cookie
+	}
+
+	/// Returns a pointer to the raw vectored handler list.
+	pub fn raw_list(&self) -> *const RawVectoredHandlerList {
+		self.raw_list
+	}
+
     pub(crate) fn list_head_addr(
         &self,
         handler_type: VectoredHandlerType,
     ) -> usize {
         let list_offset = match handler_type {
             VectoredHandlerType::Exception => {
-                offset_of!(RtlVectorHandlerList, veh_list)
+                offset_of!(RawVectoredHandlerList, veh_list)
             }
             VectoredHandlerType::Continue => {
-                offset_of!(RtlVectorHandlerList, vch_list)
+                offset_of!(RawVectoredHandlerList, vch_list)
             }
         };
         self.raw_list as usize + list_offset

@@ -23,7 +23,7 @@ pub type ProcessInstrumentationCallback = extern "system" fn(
     return_value: u64,
 );
 
+#[rustfmt::skip]
 pub type VectoredExceptionHandler = extern "system" fn(
     exception_info: *mut ExceptionPointers,
-)
-    -> ExceptionHandler;
+) -> ExceptionHandler;

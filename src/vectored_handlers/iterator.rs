@@ -1,11 +1,11 @@
 use crate::{
     error::Result,
     vectored_handlers::{
-        entry::VectoredHandlerEntry, handler_type::VectoredHandlerType,
-        list::VectoredHandlerList, utils::decode_pointer,
+        entry::{VectoredHandlerEntry, RawVectoredHandlerEntry}, handler_type::VectoredHandlerType,
+        list::{VectoredHandlerList}, utils::decode_pointer,
     },
     windows::structs::{
-        ListEntry, RtlVectorHandlerEntry, RtlVectorHandlerList,
+        ListEntry,
     },
 };
 use core::mem::offset_of;
@@ -28,18 +28,7 @@ impl<'process, 'list> VectoredHandlerIterator<'process, 'list> {
         list: &'list VectoredHandlerList<'process>,
         handler_type: VectoredHandlerType,
     ) -> Result<Self> {
-        // calculate offset of handler list based on the type
-        let offset = match handler_type {
-            VectoredHandlerType::Exception => {
-                offset_of!(RtlVectorHandlerList, veh_list)
-            }
-            VectoredHandlerType::Continue => {
-                offset_of!(RtlVectorHandlerList, vch_list)
-            }
-        };
-
-		// read first entry address
-        let head = (list.raw_list as usize + offset) as *const ListEntry;
+		let head = list.list_head_addr(handler_type) as *const ListEntry;
         let current_addr = (head as usize + offset_of!(ListEntry, next))
             as *const *const ListEntry;
         let current = list.process.read_mem(current_addr)?;
@@ -67,9 +56,9 @@ impl<'process, 'list> Iterator
         let process = self.list.process;
 
         // read the entry
-        let raw_entry_addr = self.current as *const RtlVectorHandlerEntry;
+        let raw_entry_addr = self.current as *const RawVectoredHandlerEntry;
         let raw_entry = process
-            .read_mem::<RtlVectorHandlerEntry>(raw_entry_addr)
+            .read_mem(raw_entry_addr)
             .ok()?;
 
         self.current = raw_entry.list.next;
