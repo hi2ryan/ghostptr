@@ -1,5 +1,5 @@
 pub use flags::ExceptionHandler;
-pub use structs::ExceptionPointers;
+pub use structs::{ExceptionPointers, ApcCallbackDataContext};
 
 pub mod constants;
 pub mod flags;
@@ -27,3 +27,10 @@ pub type ProcessInstrumentationCallback = extern "system" fn(
 pub type VectoredExceptionHandler = extern "system" fn(
     exception_info: *mut ExceptionPointers,
 ) -> ExceptionHandler;
+
+pub type PsApcRoutine = extern "system" fn(
+    arg1: *mut core::ffi::c_void,
+    arg2: *mut core::ffi::c_void,
+    arg3: *mut core::ffi::c_void,
+);
+

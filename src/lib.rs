@@ -48,7 +48,8 @@ pub use modules::{Export, Import, ImportType, Module, Section};
 pub use patterns::{Pattern16, Pattern32, Scanner};
 pub use process::{
     ExecutionTimes, MemScanIter, MemoryAllocation, MemoryRegionInfo,
-    MemoryRegionIter, Process, ProcessHandleInfo, Thread,
+    MemoryRegionIter, Process, ProcessHandleInfo, QueuedUserAPCParameters,
+    Thread, WaitResult,
 };
 pub use utils::{
     AddressRange, AsPointer, DebugPrivilegeGuard, HandleObject,
@@ -57,8 +58,8 @@ pub use utils::{
 };
 
 pub use windows::{
-    DllEntryPoint, Handle, NtStatus, ProcessInstrumentationCallback,
-    flags::*,
+    ApcCallbackDataContext, DllEntryPoint, Handle, NtStatus,
+    ProcessInstrumentationCallback, PsApcRoutine, flags::*,
 };
 
 #[cfg(feature = "vectored_handlers")]

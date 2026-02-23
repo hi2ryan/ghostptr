@@ -352,6 +352,7 @@ pub struct ThreadAccess(u32);
 impl ThreadAccess {
     pub const TERMINATE: Self = Self(0x0001);
     pub const SUSPEND_RESUME: Self = Self(0x0002);
+    pub const ALERT: Self = Self(0x0004);
     pub const GET_CONTEXT: Self = Self(0x0008);
     pub const SET_CONTEXT: Self = Self(0x0010);
     pub const SET_INFORMATION: Self = Self(0x0020);
@@ -571,4 +572,24 @@ pub enum ExceptionHandler {
 
     /// Resume execution at the faulting instruction.
     ContinueExecution = -1,
+}
+
+/// Flags controlling user-mode asynchronous procedure call (APC) behavior.
+#[repr(u32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum QueueUserAPCFlags {
+	/// No flags. Queues a regular user-mode APC; the target thread must enter
+    /// an alertable wait ([`Thread::alert`](crate::process::Thread::alert)) before the APC is executed.
+    None = 0x0,
+
+	/// Queues a *special* user-mode APC. Unlike regular APCs, the thread does
+    /// not need to enter an alertable state; the APC fires on the thread's
+    /// next transition to user mode.
+    Special = 0x1,
+
+	/// The APC callback receives the full processor context (register state)
+    /// that was active when the thread was interrupted to service the APC.
+	///
+	/// (see ([`ApcCallbackDataContext`](crate::windows::structs::ApcCallbackDataContext))
+	CallbackDataContext = 0x10000,
 }

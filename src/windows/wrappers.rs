@@ -1,6 +1,6 @@
-use crate::windows::structs::{
+use crate::windows::{PsApcRoutine, structs::{
     PsAttributeList, ThreadContext, TokenPrivileges,
-};
+}};
 
 use super::{
     Handle, NtStatus,
@@ -571,6 +571,77 @@ pub fn nt_set_information_thread(
             in("rdx") thread_info_class,
             in("r8") thread_info,
             in("r9") info_len,
+
+            in("rax") id,
+            lateout("rax") status,
+
+            clobber_abi("system"),
+        )
+    };
+
+    status
+}
+
+/// NtAlertThread
+#[inline(always)]
+pub fn nt_alert_thread(
+    thread_handle: Handle,
+) -> NtStatus {
+    let status: NtStatus;
+    let id = syscalls().nt_alert_thread;
+
+    unsafe {
+        asm!(
+            "mov r10, rcx",
+            "syscall",
+
+            in("rcx") thread_handle,
+
+            in("rax") id,
+            lateout("rax") status,
+
+            clobber_abi("system"),
+        )
+    };
+
+    status
+}
+
+/// NtQueueApcThreadEx2
+#[inline(always)]
+pub fn nt_queue_apc_thread_ex_2(
+    thread_handle: Handle,
+	reserve_handle: Handle,
+	apc_flags: u32,
+	apc_routine: PsApcRoutine,
+	apc_arg1: *mut c_void,
+	apc_arg2: *mut c_void,
+	apc_arg3: *mut c_void,
+) -> NtStatus {
+    let status: NtStatus;
+    let id = syscalls().nt_queue_apc_thread_ex_2;
+
+    unsafe {
+        asm!(
+			"sub rsp, 0x40",
+			
+			"mov [rsp + 0x28], {apc_arg1}",
+			"mov [rsp + 0x30], {apc_arg2}",
+			"mov [rsp + 0x38], {apc_arg3}",
+
+            "mov r10, rcx",
+            "syscall",
+
+			"add rsp, 0x40",
+
+            in("rcx") thread_handle,
+			in("rdx") reserve_handle,
+			in("r8") apc_flags,
+			in("r9") apc_routine,
+
+			apc_arg1 = in(reg) apc_arg1,
+			apc_arg2 = in(reg) apc_arg2,
+			apc_arg3 = in(reg) apc_arg3,
 
             in("rax") id,
             lateout("rax") status,

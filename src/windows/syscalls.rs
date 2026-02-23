@@ -48,6 +48,8 @@ syscalls! {
     nt_get_context_thread => "NtGetContextThread",
     nt_set_context_thread => "NtSetContextThread",
     nt_set_information_thread => "NtSetInformationThread",
+	nt_alert_thread => "NtAlertThread",
+	nt_queue_apc_thread_ex_2 => "NtQueueApcThreadEx2", // win11+
 
     nt_query_system_information => "NtQuerySystemInformation",
     nt_query_information_process => "NtQueryInformationProcess",

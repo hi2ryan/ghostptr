@@ -90,7 +90,7 @@ pub struct ProcessEnvBlock {
     pub being_debugged: u8,
     reserved2: [u8; 1],
     reserved3: [*const c_void; 2],
-    pub ldr: *const PebLoaderData, // +0x18
+    pub ldr: *const PebLoaderData,
 }
 
 #[repr(C)]
@@ -722,4 +722,12 @@ pub struct ExceptionRecord {
     pub exception_address: *mut core::ffi::c_void,
     pub number_parameters: u32,
     pub exception_information: [usize; 15],
+}
+
+#[repr(C)]
+pub struct ApcCallbackDataContext {
+	pub parameter: *mut c_void,
+	pub context_record: *mut ThreadContext,
+	pub reserved_0: *mut c_void,
+	pub reserved_1: *mut c_void,
 }

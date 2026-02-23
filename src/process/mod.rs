@@ -13,7 +13,7 @@ use crate::windows::{
 };
 pub use region::MemoryRegionIter;
 pub use scan::MemScanIter;
-pub use thread::Thread;
+pub use thread::{Thread, WaitResult, QueuedUserAPCParameters};
 pub use utils::{
     ExecutionTimes, MemoryAllocation, MemoryRegionInfo, ProcessHandleInfo,
 };
@@ -42,9 +42,6 @@ use crate::{
         },
     },
 };
-
-#[allow(unused)]
-use crate::utils::{DebugPrivilegeGuard, enable_debug_privilege};
 
 use core::{
     fmt::Display,
@@ -1123,7 +1120,7 @@ impl Process {
     /// # Privileges
     ///
     /// Setting instrumentation callbacks on remote processes requires the
-    /// debug privilege to be enabled (see [`DebugPrivilegeGuard`] or [`enable_debug_privilege`]).
+    /// debug privilege to be enabled (see [`DebugPrivilegeGuard`](crate::utils::DebugPrivilegeGuard) or [`enable_debug_privilege`](crate::utils::enable_debug_privilege)).
     ///
     /// # Errors
     ///

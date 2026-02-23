@@ -1,23 +1,26 @@
 use crate::{
     ProcessError, Result,
-    process::{ThreadAccess, ThreadContextFlags, utils::ExecutionTimes},
+    process::utils::ExecutionTimes,
     utils::SafeHandle,
     windows::{
-        Handle, NtStatus,
+        Handle, NtStatus, PsApcRoutine,
         constants::{
-            CURRENT_THREAD_HANDLE, STATUS_BUFFER_OVERFLOW, STATUS_BUFFER_TOO_SMALL,
-            STATUS_INFO_LENGTH_MISMATCH,
+            CURRENT_THREAD_HANDLE, STATUS_BUFFER_OVERFLOW,
+            STATUS_BUFFER_TOO_SMALL, STATUS_INFO_LENGTH_MISMATCH,
         },
+        flags::{QueueUserAPCFlags, ThreadAccess, ThreadContextFlags},
         structs::{
-            ClientId, KernelUserTimes, ObjectAttributes, ThreadBasicInformation, ThreadContext,
-            UnicodeString,
+            ClientId, KernelUserTimes, ObjectAttributes,
+            ThreadBasicInformation, ThreadContext, UnicodeString,
         },
         utils::unicode_to_string,
         wrappers::{
-            nt_close, nt_duplicate_object, nt_get_context_thread, nt_open_thread,
-            nt_query_information_thread, nt_resume_thread, nt_set_context_thread,
-            nt_set_information_thread, nt_suspend_thread, nt_terminate_thread,
-            nt_wait_for_single_object,
+            nt_alert_thread, nt_close, nt_duplicate_object,
+            nt_get_context_thread, nt_open_thread,
+            nt_query_information_thread, nt_queue_apc_thread_ex_2,
+            nt_resume_thread, nt_set_context_thread,
+            nt_set_information_thread, nt_suspend_thread,
+            nt_terminate_thread, nt_wait_for_single_object,
         },
     },
 };
@@ -27,13 +30,38 @@ use core::{
     time::Duration,
 };
 
+/// Represents the outcome of a thread wait operation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WaitResult {
+    /// The waited-on object became signaled before the timeout elapsed.
     Signaled,
+
+    /// The timeout elapsed before the object became signaled.
     Timeout,
+
+    /// The wait was interrupted because the thread was alerted.
+    Alerted,
+
+    /// The wait was interrupted to deliver a queued user-mode APC.
+    UserAPC,
+}
+
+/// The three arguments passed to a user-mode APC routine.
+#[derive(Debug)]
+pub struct QueuedUserAPCParameters(
+    pub *mut core::ffi::c_void,
+    pub *mut core::ffi::c_void,
+    pub *mut core::ffi::c_void,
+);
+
+impl Default for QueuedUserAPCParameters {
+    fn default() -> Self {
+        Self(ptr::null_mut(), ptr::null_mut(), ptr::null_mut())
+    }
 }
 
 /// Represents an open thread handle.
+#[derive(PartialEq)]
 pub struct Thread(Handle);
 
 impl Thread {
@@ -102,7 +130,12 @@ impl Thread {
         };
 
         let mut handle = 0;
-        let status = nt_open_thread(&mut handle, access.bits(), &mut attributes, &mut client_id);
+        let status = nt_open_thread(
+            &mut handle,
+            access.bits(),
+            &mut attributes,
+            &mut client_id,
+        );
 
         if status != 0 {
             return Err(ProcessError::NtStatus(status));
@@ -174,10 +207,16 @@ impl Thread {
     ///
     /// - `Ok(WaitResult::Signaled)` if the thread terminated.
     /// - `Ok(WaitResult::Timeout)` if the timeout elapsed.
+    /// - `Ok(WaitResult::Alerted)` if the thread was alerted.
+    /// - `Ok(WaitResult::UserAPC)` if the thread executed an user APC.
     /// - `Err(ProcessError::NtStatus(...))` for NTSTATUS failures,
     ///   possibly due to insufficient access rights.
     ///
-    pub fn wait(&self, timeout: Option<Duration>, allow_apc: bool) -> Result<WaitResult> {
+    pub fn wait(
+        &self,
+        timeout: Option<Duration>,
+        allow_apc: bool,
+    ) -> Result<WaitResult> {
         let timeout_ptr = if let Some(d) = timeout {
             let hundred_ns = d.as_nanos() as i64 / 100;
             let nt_timeout = -hundred_ns;
@@ -186,11 +225,17 @@ impl Thread {
             core::ptr::null()
         };
 
-        let status = nt_wait_for_single_object(self.0, allow_apc as u8, timeout_ptr);
+        let status = nt_wait_for_single_object(
+            self.0,
+            allow_apc as u8,
+            timeout_ptr,
+        );
 
         match status {
             0 => Ok(WaitResult::Signaled),
             0x00000102 => Ok(WaitResult::Timeout),
+            0x00000101 => Ok(WaitResult::Alerted),
+            0x000000C0 => Ok(WaitResult::UserAPC),
             _ => Err(ProcessError::NtStatus(status)),
         }
     }
@@ -260,7 +305,10 @@ impl Thread {
     /// Returns [`ProcessError::NtStatus`] if it fails to retrieve the thread's context,
     /// potentially due to insufficient access rights.
     /// Otherwise, the thread's context is returned.
-    pub fn context(&self, flags: ThreadContextFlags) -> Result<ThreadContext> {
+    pub fn context(
+        &self,
+        flags: ThreadContextFlags,
+    ) -> Result<ThreadContext> {
         let mut ctx = unsafe { core::mem::zeroed::<ThreadContext>() };
         ctx.context_flags = flags.bits();
 
@@ -506,7 +554,7 @@ impl Thread {
     /// Returns [`ProcessError::NtStatus`] if it fails to query the thread's
     /// description, potentially due to insufficient access rights.
     pub fn description(&self) -> Result<String> {
-		// initially retrieve length
+        // initially retrieve length
         let mut len = 0;
         nt_query_information_thread(
             self.0,
@@ -531,10 +579,14 @@ impl Thread {
                     // Safety:
                     // the NtQueryInformationThread syscall returned STATUS_SUCCESS
                     // and therefore filled the buffer
-                    let unicode_name = unsafe { &*(buf.as_ptr() as *const UnicodeString) };
+                    let unicode_name = unsafe {
+                        &*(buf.as_ptr() as *const UnicodeString)
+                    };
                     return Ok(unicode_to_string(unicode_name));
                 }
-                STATUS_INFO_LENGTH_MISMATCH | STATUS_BUFFER_TOO_SMALL | STATUS_BUFFER_OVERFLOW => {
+                STATUS_INFO_LENGTH_MISMATCH
+                | STATUS_BUFFER_TOO_SMALL
+                | STATUS_BUFFER_OVERFLOW => {
                     buf.resize(len as usize, 0);
                     continue;
                 }
@@ -558,6 +610,9 @@ impl Thread {
     /// Returns [`ProcessError::NtStatus`] if it fails to set the thread's
     /// description, potentially due to insufficient access rights.
     pub fn set_description(&self, description: &str) -> Result<()> {
+		// TODO: make description work with pointers and strings so we can
+		// set this to anything, allowing for thread description exploits.
+
         let buf = description.encode_utf16().collect::<Vec<_>>();
         let length = (buf.len() * 2) as u16;
         let name = UnicodeString {
@@ -571,6 +626,65 @@ impl Thread {
             0x26,
             (&name as *const UnicodeString) as _,
             size_of::<UnicodeString>() as u32,
+        );
+
+        match status {
+            0 => Ok(()),
+            _ => Err(ProcessError::NtStatus(status)),
+        }
+    }
+
+    /// Alerts and wakes the thread. Upon waking, the thread
+    /// execute any pending user-mode APCs before returning to its caller.
+    ///
+    /// # Access Rights
+    ///
+    /// This method requires the thread handle access mask to include:
+    ///
+    /// - [`ThreadAccess::ALERT`]
+    ///
+    /// Without this right, the system call will fail with an `NTSTATUS` error.
+    ///
+    /// # Returns
+    ///
+    /// Returns [`ProcessError::NtStatus`] if it fails to alert the thread,
+    /// potentially due to insufficient access rights.
+    pub fn alert(&self) -> Result<()> {
+        let status = nt_alert_thread(self.0);
+        match status {
+            0 => Ok(()),
+            _ => Err(ProcessError::NtStatus(status)),
+        }
+    }
+
+    /// Queues a user-mode Asynchronous Procedure Call (APC) on the thread.
+    ///
+    /// # Access Rights
+    ///
+    /// This method requires the thread handle access mask to include:
+    ///
+    /// - [`ThreadAccess::SET_CONTEXT`]
+    ///
+    /// Without this right, the system call will fail with an `NTSTATUS` error.
+    ///
+    /// # Returns
+    ///
+    /// Returns [`ProcessError::NtStatus`] if it fails to queue the APC,
+    /// potentially due to insufficient access rights.
+    pub fn queue_apc(
+        &self,
+        flags: QueueUserAPCFlags,
+        routine: PsApcRoutine,
+        params: QueuedUserAPCParameters,
+    ) -> Result<()> {
+        let status = nt_queue_apc_thread_ex_2(
+            self.0,
+            0,
+            flags as u32,
+            routine,
+            params.0,
+            params.1,
+            params.2,
         );
 
         match status {
@@ -610,6 +724,8 @@ impl Drop for Thread {
 
 #[cfg(test)]
 mod tests {
+    use core::sync::atomic::{AtomicBool, Ordering};
+
     use crate::*;
 
     #[test]
@@ -636,12 +752,16 @@ mod tests {
 
     #[test]
     fn suspend_resume_thread() -> Result<()> {
-        let process =
-            Process::open_first_named("Discord.exe", ProcessAccess::QUERY_LIMITED_INFORMATION)?;
+        let process = Process::open_first_named(
+            "Discord.exe",
+            ProcessAccess::QUERY_LIMITED_INFORMATION,
+        )?;
 
         let threads = process.threads()?;
-        let thread = threads[0]
-            .open(ThreadAccess::SUSPEND_RESUME | ThreadAccess::QUERY_LIMITED_INFORMATION)?;
+        let thread = threads[0].open(
+            ThreadAccess::SUSPEND_RESUME
+                | ThreadAccess::QUERY_LIMITED_INFORMATION,
+        )?;
 
         let old_count = thread.suspend()?;
         let new_count = thread.resume()?;
@@ -654,8 +774,10 @@ mod tests {
 
     #[test]
     fn thread_context() -> Result<()> {
-        let process =
-            Process::open_first_named("Discord.exe", ProcessAccess::QUERY_LIMITED_INFORMATION)?;
+        let process = Process::open_first_named(
+            "Discord.exe",
+            ProcessAccess::QUERY_LIMITED_INFORMATION,
+        )?;
 
         let threads = process.threads()?;
         let thread = threads[0].open(ThreadAccess::GET_CONTEXT)?;
@@ -697,6 +819,92 @@ mod tests {
         );
 
         thread.set_description(&orig_description)?;
+
+        Ok(())
+    }
+
+    #[test]
+    fn thread_apcs() -> Result<()> {
+        let thread = Thread::current();
+
+        static APC_CALLED: AtomicBool = AtomicBool::new(false);
+
+        extern "system" fn apc_handler(
+            arg1: *mut core::ffi::c_void,
+            arg2: *mut core::ffi::c_void,
+            arg3: *mut core::ffi::c_void,
+        ) {
+            assert!(arg1.is_null(), "arg1 should be null");
+            assert!(arg2.is_null(), "arg2 should be null");
+            assert!(arg3.is_null(), "arg3 should be null");
+
+            APC_CALLED.store(true, Ordering::Relaxed);
+        }
+
+        extern "system" fn apc_ctx_handler(
+            arg1: *mut core::ffi::c_void,
+            ctx: *mut ApcCallbackDataContext,
+            arg3: *mut core::ffi::c_void,
+        ) {
+            assert!(arg1.is_null(), "arg1 should be null");
+            assert!(
+                !ctx.is_null(),
+                "ctx (ApcCallbackDataContext) should not be null"
+            );
+            assert!(arg3.is_null(), "arg3 should be null");
+
+            let context_record = unsafe { (*ctx).context_record };
+            assert!(
+                !context_record.is_null(),
+                "context_record should not be null"
+            );
+
+            let rip = unsafe { (*context_record).rip };
+            assert!(rip != 0, "CONTEXT->Rip should not be null");
+
+            APC_CALLED.store(true, Ordering::Relaxed);
+        }
+
+        // queue APC and wait for it to be executed
+        thread.queue_apc(
+            QueueUserAPCFlags::None,
+            apc_handler,
+            QueuedUserAPCParameters::default(),
+        )?;
+        thread.wait(None, true)?;
+        assert!(
+            APC_CALLED.load(Ordering::Relaxed),
+            "apc routine was not called"
+        );
+        APC_CALLED.store(false, Ordering::Relaxed); // reset bool
+
+        // queue special APC and trigger it with a syscall
+        thread.queue_apc(
+            QueueUserAPCFlags::Special,
+            apc_handler,
+            QueuedUserAPCParameters::default(),
+        )?;
+        let _ = close_handle(0); // close invalid handle for the purpose of triggering kernel->user transition
+        assert!(
+            APC_CALLED.load(Ordering::Relaxed),
+            "special apc routine was not called"
+        );
+		APC_CALLED.store(false, Ordering::Relaxed); // reset bool
+
+        thread.queue_apc(
+            QueueUserAPCFlags::CallbackDataContext,
+            unsafe {
+                core::mem::transmute::<*const (), PsApcRoutine>(
+                    apc_ctx_handler as *const (),
+                )
+            },
+            QueuedUserAPCParameters::default(),
+        )?;
+        thread.wait(None, true)?;
+		assert!(
+            APC_CALLED.load(Ordering::Relaxed),
+            "callback context apc routine was not called"
+        );
 
         Ok(())
     }
