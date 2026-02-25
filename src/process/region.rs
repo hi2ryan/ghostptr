@@ -1,5 +1,7 @@
 use crate::{AddressRange, MemoryRegionInfo, Process, constants::PAGE_SIZE};
 
+/// Represents an iterator over the virtual memory regions
+/// intersecting a provided range.
 pub struct MemoryRegionIter<'process> {
     process: &'process Process,
     current_addr: usize,
@@ -7,7 +9,9 @@ pub struct MemoryRegionIter<'process> {
 }
 
 impl<'process> MemoryRegionIter<'process> {
-	#[inline]
+	/// Creates a new iterator over the virtual memory
+	/// regions that intersect `range`.
+	#[inline(always)]
     pub fn new(process: &'process Process, range: AddressRange) -> Self {
         Self {
             process,

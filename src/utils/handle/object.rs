@@ -18,12 +18,12 @@ use crate::process::ProcessHandleInfo;
 /// Represents an object with a handle.
 /// Used to query information about the handle, such as
 /// the type, name, and granted access of it.
-/// 
+///
 /// # Safety
-/// 
+///
 /// `HandleObject` does not automatically close the inner handle
 /// upon being dropped. The caller must ensure that
-/// the raw handle is closed once it is dropped, whether via 
+/// the raw handle is closed once it is dropped, whether via
 /// [`close_handle`] or a [`SafeHandle`] struct.
 #[repr(transparent)]
 pub struct HandleObject(Handle);
@@ -60,22 +60,21 @@ impl HandleObject {
     /// like process access and thread access. Therefore, the desired access
     /// has been kept in its raw state as a `u32`. However, if the `access` is
     /// `None`, it will copy the handle's original access mask.
-	/// 
+	///
 	/// # Access Rights
     ///
     /// If the `src_process` is a remote process, this method
     /// requires the process handle access mask to include:
     ///
-    /// - [`crate::ProcessAccess::DUP_HANDLE`]
+    /// - [`ProcessAccess::DUP_HANDLE`](crate::windows::flags::ProcessAccess::DUP_HANDLE)
     ///
     /// Without this right, the system call will fail with an
     /// `NTSTATUS` error.
     ///
     /// # Errors
     ///
-    /// Returns [`crate::ProcessError::NtStatus`] if duplicating the handle fails,
+    /// Returns [`ProcessError::NtStatus`] if duplicating the handle fails,
     /// potentially due to insufficient access rights.
-    ///
     pub fn duplicate(&self, src_process: &Process, access: Option<u32>) -> Result<Handle> {
         let mut new_handle = 0;
         let source_handle = unsafe { src_process.handle() };
@@ -118,7 +117,7 @@ impl HandleObject {
         let mut unicode_name = UnicodeString {
             length: 0,
             max_length: 0,
-            buffer: core::ptr::null(),
+            buffer: ptr::null_mut(),
         };
         let status = nt_query_object(
             self.0,

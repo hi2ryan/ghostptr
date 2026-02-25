@@ -44,7 +44,7 @@ pub use iter::{
     ModuleIterOrder, ModuleIterator, ProcessIterator, ProcessView,
     SystemModuleIterator, SystemModuleView, ThreadView,
 };
-pub use modules::{Export, Import, ImportType, Module, Section};
+pub use modules::{Export, Import, ImportType, Module, Section, ModuleLoadReason};
 pub use patterns::{Pattern16, Pattern32, Scanner};
 pub use process::{
     ExecutionTimes, MemScanIter, MemoryAllocation, MemoryRegionInfo,
@@ -54,7 +54,7 @@ pub use process::{
 pub use utils::{
     AddressRange, AsPointer, DebugPrivilegeGuard, HandleObject,
     SafeHandle, close_handle, disable_debug_privilege,
-    enable_debug_privilege,
+    enable_debug_privilege, get_module_handle,
 };
 
 pub use windows::{

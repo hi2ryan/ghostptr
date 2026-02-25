@@ -8,7 +8,7 @@ use crate::vectored_handlers::VectoredHandlerList;
 
 use crate::windows::{
     ProcessInstrumentationCallback, flags::*,
-    structs::ProcessInstrumentationCallbackInfo,
+    structs::{ProcessEnvBlock, ProcessInstrumentationCallbackInfo},
     wrappers::nt_set_information_process,
 };
 pub use region::MemoryRegionIter;
@@ -49,7 +49,8 @@ use core::{
     ptr,
 };
 
-#[derive(Debug)]
+/// Represents an open process handle.
+#[derive(Debug, PartialEq, Eq, Hash)]
 pub struct Process(Handle);
 
 impl Display for Process {
@@ -117,9 +118,14 @@ impl Process {
         Self::open(process.pid, access)
     }
 
-    /// Duplicates the underlying process handle,
-    /// returning a new `Process` struct.
+    /// Duplicates the underlying process handle, returning
+	/// a new [`Process`] struct.
     ///
+	/// This method requires an object access mask beyond standard bounds
+    /// like process access and thread access. Therefore, the desired access
+    /// has been kept in its raw state as a `u32`. However, if the `access` is
+    /// `None`, it will copy the handle's original access mask.
+	///
     /// # Access Rights
     ///
     /// This method requires the process handle access mask to include:
@@ -133,16 +139,17 @@ impl Process {
     ///
     /// Returns [`ProcessError::NtStatus`] if duplicating the handle fails,
     /// potentially due to insufficient access rights.
-    pub fn duplicate(&self) -> Result<Self> {
+    pub fn duplicate(&self, access: Option<u32>) -> Result<Self> {
         let mut new_handle: Handle = 0;
         let status = nt_duplicate_object(
             -1isize as Handle,
             self.0,
             -1isize as Handle,
             &mut new_handle,
+            access.unwrap_or(0),
             0,
-            0,
-            0x2, // DUPLICATE_SAME_ACCESS
+            // DUPLICATE_SAME_ACCESS if access is None
+            if access.is_none() { 0x2 } else { 0 },
         );
 
         match status {
@@ -250,6 +257,69 @@ impl Process {
         query_process_basic_info(self.0).map(|info| info.pid as u32)
     }
 
+	/// Reads the Process Environment Block (PEB) of
+	/// the process.
+	///
+	/// # Access Rights
+    ///
+    /// If this is a remote process, this method requires
+	/// the following access rights:
+    ///
+	/// - [`ProcessAccess::VM_READ`], **or**
+    /// - [`ProcessAccess::QUERY_INFORMATION`], **or**
+    /// - [`ProcessAccess::QUERY_LIMITED_INFORMATION`]
+    ///
+    /// Without one of these rights, the system call will fail with an
+    /// `NTSTATUS` error.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ProcessError::NtStatus`] if querying basic process information
+	/// or reading the PEB fails, potentially due to insufficient access rights.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// let process = Process::open(pid, ProcessAccess::VM_READ | ProcessAccess::QUERY_LIMITED_INFORMATION)?;
+    /// let peb = process.peb()?;
+    /// println!("PEB is being debugged: {}", peb.being_debugged == 1);
+    /// ```
+	pub fn peb(&self) -> Result<ProcessEnvBlock> {
+		let ptr = self.peb_ptr()?;
+		self.read_mem(ptr)
+	}
+
+	/// Returns a pointer to the Process Environment Block (PEB) of
+	/// the process.
+	///
+    /// # Access Rights
+    ///
+    /// If this is a remote process, this method requires
+	/// one of the following access rights:
+    ///
+    /// - [`ProcessAccess::QUERY_INFORMATION`], **or**
+    /// - [`ProcessAccess::QUERY_LIMITED_INFORMATION`]
+    ///
+    /// Without one of these rights, the system call will fail with an
+    /// `NTSTATUS` error.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ProcessError::NtStatus`] if querying basic process information fails,
+    /// potentially due to insufficient access rights.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// let process = Process::open(pid, ProcessAccess::QUERY_LIMITED_INFORMATION)?;
+    /// let peb_ptr = process.peb_ptr()?;
+    /// println!("PEB: {:p}", peb_ptr);
+    /// ```
+	#[inline]
+	pub fn peb_ptr(&self) -> Result<*mut ProcessEnvBlock> {
+		query_process_basic_info(self.0).map(|info| info.peb_base_address)
+	}
+
     /// Returns the underlying process handle.
     ///
     /// # Safety
@@ -280,7 +350,7 @@ impl Process {
     /// # Access Rights
     ///
     /// If this is a remote process,
-    /// this method requires one of the following access rights:
+    /// this method requires following access rights:
     ///
     /// - [`ProcessAccess::QUERY_INFORMATION`]
     ///
@@ -313,7 +383,7 @@ impl Process {
     /// # Access Rights
     ///
     /// If this is a remote process,
-    /// this method requires one of the following access rights:
+    /// this method requires the following access rights:
     ///
     /// - [`ProcessAccess::TERMINATE`]
     ///
@@ -414,8 +484,8 @@ impl Process {
     pub fn create_thread(
         &self,
         access: ThreadAccess,
-        start_routine: *mut core::ffi::c_void,
-        argument: *mut core::ffi::c_void,
+        start_routine: *mut (),
+        argument: Option<*mut ()>,
         flags: ThreadCreationFlags,
     ) -> Result<Thread> {
         let mut handle: Handle = 0;
@@ -425,8 +495,8 @@ impl Process {
             access.bits(),
             ptr::null_mut(),
             self.0,
-            start_routine,
-            argument,
+            start_routine as _,
+            argument.unwrap_or(ptr::null_mut()) as _,
             flags as u32,
             0,
             0,
@@ -1316,7 +1386,7 @@ mod tests {
                 .expect("failed to open remote process");
 
         let duplicated =
-            process.duplicate().expect("failed to duplicate process");
+            process.duplicate(None).expect("failed to duplicate process");
 
         // ensure that the handles aren't the same
         assert_ne!(unsafe { process.handle() }, unsafe {

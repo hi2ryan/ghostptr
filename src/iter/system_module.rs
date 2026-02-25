@@ -62,7 +62,7 @@ impl SystemModuleView {
     }
 }
 
-/// Iterates all system modules.
+/// Iterates all system modules (drivers).
 pub struct SystemModuleIterator {
     _data: Box<[u8]>,
     ptr: *const RtlProcessModuleInformation,
@@ -72,6 +72,7 @@ pub struct SystemModuleIterator {
 }
 
 impl SystemModuleIterator {
+	/// Creates a new iterator over all system modules (drivers).
     pub fn new() -> Result<Self> {
         let mut size = 0u32;
         nt_query_system_information(

@@ -11,7 +11,8 @@ use crate::{
         flags::{QueueUserAPCFlags, ThreadAccess, ThreadContextFlags},
         structs::{
             ClientId, KernelUserTimes, ObjectAttributes,
-            ThreadBasicInformation, ThreadContext, UnicodeString,
+            ThreadBasicInformation, ThreadContext, ThreadEnvBlock,
+            UnicodeString,
         },
         utils::unicode_to_string,
         wrappers::{
@@ -25,6 +26,7 @@ use crate::{
     },
 };
 use core::{
+    fmt::Display,
     mem::{ManuallyDrop, MaybeUninit},
     ptr,
     time::Duration,
@@ -48,11 +50,7 @@ pub enum WaitResult {
 
 /// The three arguments passed to a user-mode APC routine.
 #[derive(Debug)]
-pub struct QueuedUserAPCParameters(
-    pub *mut core::ffi::c_void,
-    pub *mut core::ffi::c_void,
-    pub *mut core::ffi::c_void,
-);
+pub struct QueuedUserAPCParameters(pub *mut (), pub *mut (), pub *mut ());
 
 impl Default for QueuedUserAPCParameters {
     fn default() -> Self {
@@ -61,8 +59,18 @@ impl Default for QueuedUserAPCParameters {
 }
 
 /// Represents an open thread handle.
-#[derive(PartialEq)]
+#[derive(Debug, PartialEq, Eq, Hash)]
 pub struct Thread(Handle);
+
+impl Display for Thread {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.0 == CURRENT_THREAD_HANDLE {
+            write!(f, "Thread(Current)")
+        } else {
+            write!(f, "Thread({:#X})", self.0)
+        }
+    }
+}
 
 impl Thread {
     const CURRENT: Self = Self(CURRENT_THREAD_HANDLE);
@@ -144,22 +152,45 @@ impl Thread {
         Ok(Self(handle))
     }
 
-    pub fn duplicate(&self) -> Result<Thread> {
+    /// Duplicates the underlying thread handle, creating a new
+    /// [`Thread`] struct wrapping around it.
+    ///
+    /// This method requires an object access mask beyond standard bounds
+    /// like process access and thread access. Therefore, the desired access
+    /// has been kept in its raw state as a `u32`. However, if the `access` is
+    /// `None`, it will copy the handle's original access mask.
+    ///
+    /// # Access Rights
+    ///
+    /// If the `src_process` is a remote process, this method
+    /// requires the process handle access mask to include:
+    ///
+    /// - [`ProcessAccess::DUP_HANDLE`](crate::windows::flags::ProcessAccess::DUP_HANDLE)
+    ///
+    /// Without this right, the system call will fail with an
+    /// `NTSTATUS` error.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ProcessError::NtStatus`] if duplicating the handle fails,
+    /// potentially due to insufficient access rights.
+    pub fn duplicate(&self, access: Option<u32>) -> Result<Thread> {
         let mut new_handle: Handle = 0;
         let status = nt_duplicate_object(
             -1isize as Handle,
             self.0,
             -1isize as Handle,
             &mut new_handle,
+            access.unwrap_or(0),
             0,
-            0,
-            0x2, // DUPLICATE_SAME_ACCESS
+            // DUPLICATE_SAME_ACCESS if access is None
+            if access.is_none() { 0x2 } else { 0 },
         );
 
-        if status != 0x0 {
-            return Err(ProcessError::NtStatus(status));
+        match status {
+            0 => Ok(Thread(new_handle)),
+            _ => Err(ProcessError::NtStatus(status)),
         }
-        Ok(Thread(new_handle))
     }
 
     /// Terminates the thread.
@@ -389,6 +420,37 @@ impl Thread {
             .map(|info| info.client_id.unique_process as u32)
     }
 
+    /// Returns a pointer to the Thread Environment Block (TEB) of
+    /// the thread.
+    ///
+    /// # Access Rights
+    ///
+    /// If this is a remote process, this method requires
+    /// one of the following access rights:
+    ///
+    /// - [`ThreadAccess::QUERY_INFORMATION`], **or**
+    /// - [`ThreadAccess::QUERY_LIMITED_INFORMATION`]
+    ///
+    /// Without one of these rights, the system call will fail with an
+    /// `NTSTATUS` error.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ProcessError::NtStatus`] if querying basic process information fails,
+    /// potentially due to insufficient access rights.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// let process = Thread::open(tid, ThreadAccess::QUERY_LIMITED_INFORMATION)?;
+    /// let teb_ptr = process.teb_ptr()?;
+    /// println!("TEB: {:p}", teb_ptr);
+    /// ```
+    #[inline]
+    pub fn teb_ptr(&self) -> Result<*mut ThreadEnvBlock> {
+        self.query_info().map(|info| info.teb_base_address)
+    }
+
     /// Retrieves the current priority of the thread
     ///
     /// # Access Rights
@@ -610,20 +672,57 @@ impl Thread {
     /// Returns [`ProcessError::NtStatus`] if it fails to set the thread's
     /// description, potentially due to insufficient access rights.
     pub fn set_description(&self, description: &str) -> Result<()> {
-		// TODO: make description work with pointers and strings so we can
-		// set this to anything, allowing for thread description exploits.
-
-        let buf = description.encode_utf16().collect::<Vec<_>>();
+        let mut buf = description.encode_utf16().collect::<Vec<_>>();
         let length = (buf.len() * 2) as u16;
         let name = UnicodeString {
             length,
             max_length: length,
-            buffer: buf.as_ptr(),
+            buffer: buf.as_mut_ptr(),
         };
 
         let status = nt_set_information_thread(
             self.0,
-            0x26,
+            0x26, // ThreadNameInformation
+            (&name as *const UnicodeString) as _,
+            size_of::<UnicodeString>() as u32,
+        );
+
+        match status {
+            0 => Ok(()),
+            _ => Err(ProcessError::NtStatus(status)),
+        }
+    }
+
+    /// Assigns a description (name) to a thread according to the
+    /// `bytes` provided. This method exists solely to allow using
+    /// non-`str` typed description. For example, this allows
+    /// shellcode thread name-calling exploitation.
+    ///
+    /// However, the description will stop at a null terminator.
+    ///
+    /// # Access Rights
+    ///
+    /// This method requires the thread handle access mask to include:
+    ///
+    /// - [`ThreadAccess::SET_INFORMATION`]
+    ///
+    /// Without this right, the system call will fail with an `NTSTATUS` error.
+    ///
+    /// # Returns
+    ///
+    /// Returns [`ProcessError::NtStatus`] if it fails to set the thread's
+    /// description, potentially due to insufficient access rights.
+    pub fn set_description_bytes(&self, description: &[u8]) -> Result<()> {
+        let length = description.len() as u16;
+        let name = UnicodeString {
+            length,
+            max_length: length,
+            buffer: description.as_ptr() as *mut u16,
+        };
+
+        let status = nt_set_information_thread(
+            self.0,
+            0x26, // ThreadNameInformation
             (&name as *const UnicodeString) as _,
             size_of::<UnicodeString>() as u32,
         );
@@ -682,9 +781,9 @@ impl Thread {
             0,
             flags as u32,
             routine,
-            params.0,
-            params.1,
-            params.2,
+            params.0 as _,
+            params.1 as _,
+            params.2 as _,
         );
 
         match status {
@@ -830,9 +929,9 @@ mod tests {
         static APC_CALLED: AtomicBool = AtomicBool::new(false);
 
         extern "system" fn apc_handler(
-            arg1: *mut core::ffi::c_void,
-            arg2: *mut core::ffi::c_void,
-            arg3: *mut core::ffi::c_void,
+            arg1: *mut (),
+            arg2: *mut (),
+            arg3: *mut (),
         ) {
             assert!(arg1.is_null(), "arg1 should be null");
             assert!(arg2.is_null(), "arg2 should be null");
@@ -842,9 +941,9 @@ mod tests {
         }
 
         extern "system" fn apc_ctx_handler(
-            arg1: *mut core::ffi::c_void,
+            arg1: *mut (),
             ctx: *mut ApcCallbackDataContext,
-            arg3: *mut core::ffi::c_void,
+            arg3: *mut (),
         ) {
             assert!(arg1.is_null(), "arg1 should be null");
             assert!(
@@ -889,7 +988,7 @@ mod tests {
             APC_CALLED.load(Ordering::Relaxed),
             "special apc routine was not called"
         );
-		APC_CALLED.store(false, Ordering::Relaxed); // reset bool
+        APC_CALLED.store(false, Ordering::Relaxed); // reset bool
 
         thread.queue_apc(
             QueueUserAPCFlags::CallbackDataContext,
@@ -901,7 +1000,7 @@ mod tests {
             QueuedUserAPCParameters::default(),
         )?;
         thread.wait(None, true)?;
-		assert!(
+        assert!(
             APC_CALLED.load(Ordering::Relaxed),
             "callback context apc routine was not called"
         );

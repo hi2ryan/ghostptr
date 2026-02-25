@@ -14,9 +14,9 @@ use core::slice::from_raw_parts;
 type Handle = usize;
 
 #[inline(always)]
-pub fn get_peb() -> *const ProcessEnvBlock {
+pub fn get_peb() -> *mut ProcessEnvBlock {
     unsafe {
-        let peb: *const ProcessEnvBlock;
+        let peb: *mut ProcessEnvBlock;
         asm!(
             "mov {}, gs:[0x60]",
             out(reg) peb,

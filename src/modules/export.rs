@@ -115,7 +115,7 @@ impl<'process, 'module> ExportIterator<'process, 'module> {
     /// # Arguments
     /// - `rva` The export's RVA to check.
     #[inline(always)]
-    pub(crate) fn is_forwarded(&self, rva: u32) -> bool {
+    fn is_forwarded(&self, rva: u32) -> bool {
         self.export_directory_range.contains(&rva)
     }
 }

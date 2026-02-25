@@ -1,9 +1,11 @@
 pub mod export;
 pub mod import;
 pub mod section;
+mod load_reason;
 
 pub use export::{Export, ExportIterator};
 pub use import::{Import, ImportType};
+pub use load_reason::ModuleLoadReason;
 pub use section::Section;
 
 use crate::{
@@ -16,7 +18,7 @@ use crate::{
         structs::{
             ImageDataDirectory, ImageDosHeader, ImageExportDirectory,
             ImageImportDescriptor, ImageNtHeaders64,
-            ImageOptionalHeader64, ImageSectionHeader, LdrDllLoadReason,
+            ImageOptionalHeader64, ImageSectionHeader,
             LoaderDataTableEntry,
         },
     },
@@ -40,7 +42,7 @@ pub struct Module<'process> {
     pub base_address: usize,
 
     /// Entry point of the module.
-    pub entry_point: *const DllEntryPoint,
+    pub entry_point: Option<DllEntryPoint>,
 
     /// The size of the image, in bytes, from the PE header.
     pub image_size: u32,
@@ -192,8 +194,8 @@ impl<'process> Module<'process> {
     ///
     /// # Errors
     /// - [`ProcessError::MalformedPE`] if the module appears to have
-	///   invalid PE headers.
-	/// - [`ProcessError::NoExportDirectory`] if the module appears to have no
+    ///   invalid PE headers.
+    /// - [`ProcessError::NoExportDirectory`] if the module appears to have no
     ///   export directory (rva = 0).
     /// - [`ProcessError::NtStatus`] if reading memory fails.
     ///
@@ -229,7 +231,7 @@ impl<'process> Module<'process> {
     /// ```
     pub fn get_export(&self, name: &str) -> Result<Export> {
         // parse exports
-		let (export_data_dir, export_directory) =
+        let (export_data_dir, export_directory) =
             self.export_directory()?;
         let (names, ordinals, functions) =
             self.resolve_exports(&export_directory)?;
@@ -242,7 +244,7 @@ impl<'process> Module<'process> {
             while lo <= hi {
                 let mid = lo + (hi - lo) / 2;
 
-				// read name
+                // read name
                 let rva = names[mid];
                 let name_va = self.base_address.wrapping_add(rva as usize);
                 let mid_name =
@@ -251,7 +253,7 @@ impl<'process> Module<'process> {
                         Err(_) => continue,
                     };
 
-				// compare
+                // compare
                 match mid_name.as_str().cmp(name) {
                     Ordering::Equal => {
                         let ordinal = ordinals[mid];
@@ -359,7 +361,7 @@ impl<'process> Module<'process> {
             && let Some((forwarder, address)) =
                 self.resolve_forwarded_export(address)
         {
-			// update export with resolved address and forwarding information
+            // update export with resolved address and forwarding information
             export.forwarder = Some(forwarder);
             export.address = address;
         }
@@ -722,63 +724,6 @@ impl<'process> Module<'process> {
             image_size: ldr_entry.size_of_image,
             load_reason: ldr_entry.load_reason.into(),
             flags: ldr_entry.flags,
-        }
-    }
-}
-
-/// Represents the reasoning behind why a module was loaded.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ModuleLoadReason {
-    /// The load reason is unknown.
-    Unknown,
-    /// Loaded because it is a static dependency of another module.
-    StaticDependency,
-    /// Loaded because it is a static forwarder dependency.
-    StaticForwarderDependency,
-    /// Loaded because it is a dynamic forwarder dependency.
-    DynamicForwarderDependency,
-    /// Loaded because it is a delay-loaded dependency.
-    DelayloadDependency,
-    /// Loaded explicitly via `LoadLibrary` or similar dynamic loading.
-    DynamicLoad,
-    /// Loaded as an image (typical normal module load).
-    AsImageLoad,
-    /// Loaded as data, not as a module image.
-    AsDataLoad,
-    /// Primary module for an enclave (Windows REDSTONE3+).
-    EnclavePrimary,
-    /// Dependency module for an enclave.
-    EnclaveDependency,
-    /// Loaded as a patch image (Windows 11+).
-    PatchImage,
-}
-
-impl From<LdrDllLoadReason> for ModuleLoadReason {
-    fn from(reason: LdrDllLoadReason) -> Self {
-        match reason {
-            LdrDllLoadReason::Unknown => ModuleLoadReason::Unknown,
-            LdrDllLoadReason::StaticDependency => {
-                ModuleLoadReason::StaticDependency
-            }
-            LdrDllLoadReason::StaticForwarderDependency => {
-                ModuleLoadReason::StaticForwarderDependency
-            }
-            LdrDllLoadReason::DynamicForwarderDependency => {
-                ModuleLoadReason::DynamicForwarderDependency
-            }
-            LdrDllLoadReason::DelayloadDependency => {
-                ModuleLoadReason::DelayloadDependency
-            }
-            LdrDllLoadReason::DynamicLoad => ModuleLoadReason::DynamicLoad,
-            LdrDllLoadReason::AsImageLoad => ModuleLoadReason::AsImageLoad,
-            LdrDllLoadReason::AsDataLoad => ModuleLoadReason::AsDataLoad,
-            LdrDllLoadReason::EnclavePrimary => {
-                ModuleLoadReason::EnclavePrimary
-            }
-            LdrDllLoadReason::EnclaveDependency => {
-                ModuleLoadReason::EnclaveDependency
-            }
-            LdrDllLoadReason::PatchImage => ModuleLoadReason::PatchImage,
         }
     }
 }

@@ -1,4 +1,3 @@
-use core::ptr;
 use ghostptr::{
     AllocationType, MemoryProtection, Process, ProcessAccess, ThreadAccess,
     ThreadCreationFlags,
@@ -40,7 +39,7 @@ fn main() -> ghostptr::Result<()> {
     let thread = process.create_thread(
         ThreadAccess::SYNCHRONIZE,
         allocation.address as _,
-        ptr::null_mut(),
+        None,
         ThreadCreationFlags::None,
     )?;
 

@@ -13,7 +13,7 @@ use crate::{
         wrappers::{nt_duplicate_object, nt_query_object},
     },
 };
-use core::time::Duration;
+use core::{ptr, time::Duration};
 
 #[derive(Debug)]
 pub struct ExecutionTimes {
@@ -221,7 +221,7 @@ impl<'process> ProcessHandleInfo<'process> {
         let mut unicode_name = UnicodeString {
             length: 0,
             max_length: 0,
-            buffer: core::ptr::null(),
+            buffer: ptr::null_mut(),
         };
         let status = nt_query_object(
             self.handle,

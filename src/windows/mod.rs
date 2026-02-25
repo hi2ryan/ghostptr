@@ -12,9 +12,9 @@ pub type Handle = usize;
 pub type NtStatus = i32;
 
 pub type DllEntryPoint = extern "system" fn(
-    dll_handle: *const core::ffi::c_void,
+    dll_handle: *const (),
     reason: u32,
-    context: *const core::ffi::c_void,
+    context: *const (),
 );
 
 pub type ProcessInstrumentationCallback = extern "system" fn(
@@ -29,8 +29,8 @@ pub type VectoredExceptionHandler = extern "system" fn(
 ) -> ExceptionHandler;
 
 pub type PsApcRoutine = extern "system" fn(
-    arg1: *mut core::ffi::c_void,
-    arg2: *mut core::ffi::c_void,
-    arg3: *mut core::ffi::c_void,
+    arg1: *mut (),
+    arg2: *mut (),
+    arg3: *mut (),
 );
 

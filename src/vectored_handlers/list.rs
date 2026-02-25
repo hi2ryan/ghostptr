@@ -160,8 +160,8 @@ impl<'process> VectoredHandlerList<'process> {
             // create entry
             let entry = RawVectoredHandlerEntry {
                 list: ListEntry {
-                    next: old_head_entry_addr as *const _, // point to old head
-                    prev: head_addr as *const _, // point back to list head
+                    next: old_head_entry_addr as *mut _, // point to old head
+                    prev: head_addr as *mut _, // point back to list head
                 },
                 ref_count: ref_count_address,
                 zero: 0,
@@ -193,8 +193,8 @@ impl<'process> VectoredHandlerList<'process> {
             // create entry
             let entry = RawVectoredHandlerEntry {
                 list: ListEntry {
-                    next: head_addr as *const _, // point to head
-                    prev: old_tail_entry_addr as *const _, // point back to old tail
+                    next: head_addr as *mut _, // point to head
+                    prev: old_tail_entry_addr as *mut _, // point back to old tail
                 },
                 ref_count: ref_count_address,
                 zero: 0,

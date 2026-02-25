@@ -44,7 +44,7 @@ pub fn is_valid_address(address: usize) -> bool {
 /// Retrieves the base address of a module by its name.
 /// If `name` is `None`, returns the base address of the current module.
 /// Returns `None` if the module is not found.
-pub fn get_module_base(name: Option<&str>) -> Option<*const u8> {
+pub fn get_module_handle(name: Option<&str>) -> Option<*const u8> {
     unsafe {
         let peb = get_peb();
         let ldr = (*peb).ldr;
@@ -52,7 +52,7 @@ pub fn get_module_base(name: Option<&str>) -> Option<*const u8> {
         let head = &(*ldr).in_memory_order_module_list;
         let mut current = head.next;
 
-        while current != head {
+        while current.cast_const() != head {
             let entry = (current as usize
                 - core::mem::offset_of!(
                     LoaderDataTableEntry,
