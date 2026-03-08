@@ -5,8 +5,8 @@ use crate::{
     iter::thread::ThreadView,
     windows::{
         constants::STATUS_INFO_LENGTH_MISMATCH, flags::ProcessAccess,
-        structs::SystemProcessInformation, utils::unicode_to_string,
-        wrappers::nt_query_system_information,
+        structs::SystemProcessInformation,
+        syscalls::stubs::nt_query_system_information,
     },
 };
 
@@ -113,7 +113,7 @@ impl Iterator for ProcessIterator {
 
 		// read basic information
         let pid = info.unique_process_id as u32;
-        let name = unicode_to_string(&info.image_name);
+        let name = info.image_name.as_string_lossy();
         let thread_count = info.number_of_threads;
 
         if info.next_entry_offset == 0 {

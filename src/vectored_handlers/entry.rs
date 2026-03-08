@@ -16,7 +16,7 @@ use crate::{
 pub type RawVectoredHandlerEntry = RtlVectoredHandlerEntry;
 
 #[allow(unused_imports)]
-use crate::{windows::flags::ProcessAccess, error::ProcessError};
+use crate::{error::ProcessError, windows::flags::ProcessAccess};
 
 #[derive(Clone)]
 pub struct VectoredHandlerEntry<'process, 'list> {
@@ -24,18 +24,18 @@ pub struct VectoredHandlerEntry<'process, 'list> {
     handler_address: usize,
 
     raw_entry: *const RawVectoredHandlerEntry,
-    pub handler_type: VectoredHandlerType,
+    handler_type: VectoredHandlerType,
 }
 
 impl<'process, 'list> VectoredHandlerEntry<'process, 'list> {
-	/// Returns the handler of the entry as a [`usize`].
-    #[inline(always)]
+    /// Returns the handler of the entry as a [`usize`].
+    #[inline]
     pub fn handler_addr(&self) -> usize {
         self.handler_address
     }
 
-	/// Returns the handler of the entry.
-    #[inline(always)]
+    /// Returns the handler of the entry.
+    #[inline]
     pub fn handler(&self) -> VectoredExceptionHandler {
         unsafe {
             mem::transmute::<usize, VectoredExceptionHandler>(
@@ -44,19 +44,25 @@ impl<'process, 'list> VectoredHandlerEntry<'process, 'list> {
         }
     }
 
-	/// Writes the entry's handler address, encoding the pointer.
-	///
-	/// # Arguments
-	/// `handler` The new vectored handler to set.
-	///
-	/// # Access Rights
+    /// Returns the vectored handler type of the entry.
+    #[inline]
+    pub fn handler_type(&self) -> VectoredHandlerType {
+        self.handler_type
+    }
+
+    /// Writes the entry's handler address, encoding the pointer.
+    ///
+    /// # Arguments
+    /// `handler` The new vectored handler to set.
+    ///
+    /// # Access Rights
     ///
     /// If this is a remote process,
     /// this method requires the process handle access mask to include:
     ///
     /// - [`ProcessAccess::VM_READ`],
     /// - [`ProcessAccess::VM_WRITE`],
-	/// - [`ProcessAccess::VM_OPERATION`] **and**
+    /// - [`ProcessAccess::VM_OPERATION`] **and**
     /// - [`ProcessAccess::QUERY_INFORMATION`] **or** [`ProcessAccess::QUERY_LIMITED_INFORMATION`]
     ///
     /// # Errors
@@ -67,7 +73,7 @@ impl<'process, 'list> VectoredHandlerEntry<'process, 'list> {
         handler: VectoredExceptionHandler,
     ) -> Result<()> {
         let encoded_handler =
-            encode_pointer(handler as usize, self.list.cookie);
+            encode_pointer(handler as usize, self.list.cookie());
 
         protection_write(
             self.list.process,
@@ -77,12 +83,12 @@ impl<'process, 'list> VectoredHandlerEntry<'process, 'list> {
         )
     }
 
-	/// Reads (and decodes) the entry's handler address.
-	///
-	/// Only necessary if the caller believes the handler
-	/// address has been modified. Otherwise, using
-	/// [`VectoredHandlerEntry::handler`] or [`VectoredHandlerEntry::handler_addr`]
-	/// would be more performant due to handler address caching.
+    /// Reads (and decodes) the entry's handler address.
+    ///
+    /// Only necessary if the caller believes the handler
+    /// address has been modified. Otherwise, using
+    /// [`VectoredHandlerEntry::handler`] or [`VectoredHandlerEntry::handler_addr`]
+    /// would be more performant due to handler address caching.
     pub fn read_handler(&self) -> Result<VectoredExceptionHandler> {
         let encoded_handler_addr = (self.raw_entry as usize)
             + offset_of!(RawVectoredHandlerEntry, encoded_handler);
@@ -90,7 +96,7 @@ impl<'process, 'list> VectoredHandlerEntry<'process, 'list> {
             self.list.process.read_mem(encoded_handler_addr)?;
 
         let decoded_handler =
-            decode_pointer(encoded_handler, self.list.cookie);
+            decode_pointer(encoded_handler, self.list.cookie());
         Ok(unsafe {
             mem::transmute::<usize, VectoredExceptionHandler>(
                 decoded_handler,
@@ -98,19 +104,19 @@ impl<'process, 'list> VectoredHandlerEntry<'process, 'list> {
         })
     }
 
-	/// Removes the entry from the vectored handler list.
-	///
-	/// # Arguments
-	/// - `free_entry` Frees the memory allocated to the internal RtlVectorHandlerEntry
-	///
-	/// # Access Rights
+    /// Removes the entry from the vectored handler list.
+    ///
+    /// # Arguments
+    /// - `free_entry` Frees the memory allocated to the internal RtlVectorHandlerEntry
+    ///
+    /// # Access Rights
     ///
     /// If this is a remote process,
     /// this method requires the process handle access mask to include:
     ///
     /// - [`ProcessAccess::VM_READ`],
     /// - [`ProcessAccess::VM_WRITE`],
-	/// - [`ProcessAccess::VM_OPERATION`] **and**
+    /// - [`ProcessAccess::VM_OPERATION`] **and**
     /// - [`ProcessAccess::QUERY_INFORMATION`] **or** [`ProcessAccess::QUERY_LIMITED_INFORMATION`]
     ///
     /// # Errors
@@ -149,7 +155,7 @@ impl<'process, 'list> VectoredHandlerEntry<'process, 'list> {
         protection_write(process, next_prev_addr, &prev)?;
 
         if free_entry {
-			// free the entry
+            // free the entry
             process.free_mem(
                 self.raw_entry as usize,
                 size_of::<RawVectoredHandlerEntry>(),
@@ -160,11 +166,11 @@ impl<'process, 'list> VectoredHandlerEntry<'process, 'list> {
         Ok(())
     }
 
-	/// Returns a pointer to the raw vectored handler entry.
-	#[inline(always)]
-	pub fn raw_entry(&self) -> *const RawVectoredHandlerEntry {
-		self.raw_entry
-	}
+    /// Returns a pointer to the raw vectored handler entry.
+    #[inline(always)]
+    pub fn raw_entry(&self) -> *const RawVectoredHandlerEntry {
+        self.raw_entry
+    }
 
     #[inline(always)]
     pub(crate) fn from_raw_entry(

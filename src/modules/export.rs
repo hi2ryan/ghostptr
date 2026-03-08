@@ -11,7 +11,7 @@ use crate::error::ProcessError;
 /// Exports can be:
 /// - Named
 /// - Ordinal-only (no name)
-/// - Forwarded to another module (however, the export's forwarded
+/// - Forwarded to another module (the export's forwarded
 ///   address will be resolved)
 #[derive(Debug, Clone)]
 pub struct Export {
@@ -38,23 +38,20 @@ pub struct ExportForwarder {
     pub dll: String,
 
     /// The export forwarded to.
-    ///
-    /// e.g. `ForwardedBy::Name("RtlProtectHeap")`
-    /// or `ForwardedBy::Ordinal(24)`
-    pub export: ForwardedBy,
+    pub export: Box<Export>,
+
+	/// The method used to forward the export.
+	pub method: ForwardMethod,
 }
 
 /// The method used in forwarding an export.
-///
-/// e.g. `ForwardedBy::Name("RtlProtectHeap")`
-/// or `ForwardedBy::Ordinal(24)`
 #[derive(Debug, Clone)]
-pub enum ForwardedBy {
-    /// Forwarded by ordinal.
-    Ordinal(u16),
+pub enum ForwardMethod {
+	/// Forwarded by ordinal.
+	Ordinal,
 
-    /// Forwarded by name.
-    Name(String),
+	/// Forwarded by name.
+	Name,
 }
 
 /// An iterator over all exports from a module.
@@ -114,7 +111,7 @@ impl<'process, 'module> ExportIterator<'process, 'module> {
     ///
     /// # Arguments
     /// - `rva` The export's RVA to check.
-    #[inline(always)]
+    #[inline]
     fn is_forwarded(&self, rva: u32) -> bool {
         self.export_directory_range.contains(&rva)
     }

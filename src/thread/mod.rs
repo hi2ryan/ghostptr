@@ -1,3 +1,9 @@
+pub mod wait_result;
+pub use wait_result::WaitResult;
+
+pub mod apc;
+pub use apc::QueuedUserAPCParameters;
+
 use crate::{
     ProcessError, Result,
     process::utils::ExecutionTimes,
@@ -14,8 +20,7 @@ use crate::{
             ThreadBasicInformation, ThreadContext, ThreadEnvBlock,
             UnicodeString,
         },
-        utils::unicode_to_string,
-        wrappers::{
+        syscalls::stubs::{
             nt_alert_thread, nt_close, nt_duplicate_object,
             nt_get_context_thread, nt_open_thread,
             nt_query_information_thread, nt_queue_apc_thread_ex_2,
@@ -31,32 +36,6 @@ use core::{
     ptr,
     time::Duration,
 };
-
-/// Represents the outcome of a thread wait operation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum WaitResult {
-    /// The waited-on object became signaled before the timeout elapsed.
-    Signaled,
-
-    /// The timeout elapsed before the object became signaled.
-    Timeout,
-
-    /// The wait was interrupted because the thread was alerted.
-    Alerted,
-
-    /// The wait was interrupted to deliver a queued user-mode APC.
-    UserAPC,
-}
-
-/// The three arguments passed to a user-mode APC routine.
-#[derive(Debug)]
-pub struct QueuedUserAPCParameters(pub *mut (), pub *mut (), pub *mut ());
-
-impl Default for QueuedUserAPCParameters {
-    fn default() -> Self {
-        Self(ptr::null_mut(), ptr::null_mut(), ptr::null_mut())
-    }
-}
 
 /// Represents an open thread handle.
 #[derive(Debug, PartialEq, Eq, Hash)]
@@ -102,7 +81,7 @@ impl Thread {
     }
 
     /// Consumes the [`Thread`] and returns the underlying handle without closing it.
-    #[inline(always)]
+    #[inline]
     pub fn into_handle(self) -> Handle {
         let thread = ManuallyDrop::new(self);
         thread.0
@@ -110,31 +89,27 @@ impl Thread {
 
     /// Consumes the [`Thread`] and returns the a [`SafeHandle`] containing
     /// the underlying thread handle.
-    #[inline(always)]
+    #[inline]
     pub fn into_safe_handle(self) -> SafeHandle {
         let thread = ManuallyDrop::new(self);
         SafeHandle::from(thread.0)
     }
 
     /// Opens an existing thread.
+	///
+	/// # Arguments
+	/// - `tid` The thread identifier.
+	/// - `access` The thread access mask to open the thread with.
     ///
     /// # Errors
     ///
     /// Returns [`ProcessError::NtStatus`] if the thread identifier
     /// or access mask is invalid.
     pub fn open(tid: u32, access: ThreadAccess) -> Result<Self> {
+        let mut attributes = ObjectAttributes::default();
         let mut client_id = ClientId {
             unique_process: 0,
             unique_thread: tid as usize,
-        };
-
-        let mut attributes = ObjectAttributes {
-            length: core::mem::size_of::<ObjectAttributes>() as u32,
-            root_directory: 0,
-            object_name: core::ptr::null_mut(),
-            attributes: 0,
-            security_descriptor: core::ptr::null_mut(),
-            security_quality_of_service: core::ptr::null_mut(),
         };
 
         let mut handle = 0;
@@ -644,7 +619,7 @@ impl Thread {
                     let unicode_name = unsafe {
                         &*(buf.as_ptr() as *const UnicodeString)
                     };
-                    return Ok(unicode_to_string(unicode_name));
+                    return Ok(unicode_name.as_string_lossy());
                 }
                 STATUS_INFO_LENGTH_MISMATCH
                 | STATUS_BUFFER_TOO_SMALL

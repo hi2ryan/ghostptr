@@ -1,3 +1,4 @@
+/// Parses an IDA-style pattern.
 pub fn parse_ida_pattern(pat: &str) -> (Vec<u8>, Vec<u8>) {
     let mut bytes: Vec<u8> = Vec::new();
     let mut mask: Vec<u8> = Vec::new();

@@ -1,4 +1,8 @@
-use crate::{AddressRange, MemoryRegionInfo, Process, constants::PAGE_SIZE};
+use crate::{
+    constants::PAGE_SIZE,
+    process::{MemoryRegion, Process},
+    utils::AddressRange,
+};
 
 /// Represents an iterator over the virtual memory regions
 /// intersecting a provided range.
@@ -9,9 +13,9 @@ pub struct MemoryRegionIter<'process> {
 }
 
 impl<'process> MemoryRegionIter<'process> {
-	/// Creates a new iterator over the virtual memory
-	/// regions that intersect `range`.
-	#[inline(always)]
+    /// Creates a new iterator over the virtual memory
+    /// regions that intersect `range`.
+    #[inline(always)]
     pub fn new(process: &'process Process, range: AddressRange) -> Self {
         Self {
             process,
@@ -22,12 +26,12 @@ impl<'process> MemoryRegionIter<'process> {
 }
 
 impl<'process> Iterator for MemoryRegionIter<'process> {
-    type Item = MemoryRegionInfo;
+    type Item = MemoryRegion;
 
     fn next(&mut self) -> Option<Self::Item> {
         let info = loop {
             if self.current_addr > self.end_addr {
-				// beyond end address
+                // beyond end address
                 return None;
             }
 
@@ -45,7 +49,7 @@ impl<'process> Iterator for MemoryRegionIter<'process> {
             return None;
         }
 
-		self.current_addr += info.size;
+        self.current_addr += info.size;
         Some(info)
     }
 }

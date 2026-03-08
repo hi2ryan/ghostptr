@@ -6,7 +6,7 @@ use crate::{
     windows::{
         constants::STATUS_INFO_LENGTH_MISMATCH,
         structs::{SystemHandleInformationEx, SystemHandleTableEntryInfoEx},
-        wrappers::nt_query_system_information,
+        syscalls::stubs::nt_query_system_information,
     },
 };
 

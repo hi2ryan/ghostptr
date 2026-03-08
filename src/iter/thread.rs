@@ -1,6 +1,6 @@
 use crate::{
     error::Result,
-    process::thread::Thread,
+    thread::Thread,
     windows::{
         flags::ThreadAccess,
         structs::{SystemThreadInformation, ThreadState, ThreadWaitReason},

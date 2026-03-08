@@ -45,8 +45,8 @@ pub struct HandlerEntryAddresses {
 /// Represents the vectored handlers in a process.
 pub struct VectoredHandlerList<'process> {
     pub(crate) process: &'process Process,
-    pub(crate) raw_list: *const RawVectoredHandlerList,
-    pub(crate) cookie: u32,
+    raw_list: *const RawVectoredHandlerList,
+    cookie: u32,
 }
 
 impl<'process> VectoredHandlerList<'process> {
@@ -243,7 +243,7 @@ impl<'process> VectoredHandlerList<'process> {
     /// # Errors
     ///
     /// Returns [`ProcessError::NtStatus`] if reading, protecting, or writing memory fails.
-    #[inline(always)]
+    #[inline]
     pub fn add_first(
         &self,
         handler_type: VectoredHandlerType,
@@ -274,7 +274,7 @@ impl<'process> VectoredHandlerList<'process> {
     /// # Errors
     ///
     /// Returns [`ProcessError::NtStatus`] if reading, protecting, or writing memory fails.
-    #[inline(always)]
+    #[inline]
     pub fn add_last(
         &self,
         handler_type: VectoredHandlerType,
@@ -316,7 +316,7 @@ impl<'process> VectoredHandlerList<'process> {
     /// # Errors
     ///
     /// Returns [`ProcessError::NtStatus`] if reading or writing memory fails.
-    #[inline(always)]
+    #[inline]
     pub fn iter<'handlers>(
         &'handlers self,
         handler_type: VectoredHandlerType,
@@ -326,12 +326,13 @@ impl<'process> VectoredHandlerList<'process> {
 
 	/// Returns the cached process cookie queried when the
 	/// [`VectoredHandlerList`] was initialized.
-	#[inline(always)]
+	#[inline]
 	pub fn cookie(&self) -> u32 {
 		self.cookie
 	}
 
 	/// Returns a pointer to the raw vectored handler list.
+	#[inline]
 	pub fn raw_list(&self) -> *const RawVectoredHandlerList {
 		self.raw_list
 	}

@@ -1,3 +1,5 @@
+pub mod stubs;
+
 use std::sync::LazyLock;
 
 use crate::windows::utils::{get_export_by_hash, get_ntdll_base};

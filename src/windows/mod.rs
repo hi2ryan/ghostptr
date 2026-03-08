@@ -6,7 +6,6 @@ pub mod flags;
 pub mod structs;
 pub mod syscalls;
 pub mod utils;
-pub mod wrappers;
 
 pub type Handle = usize;
 pub type NtStatus = i32;
@@ -23,6 +22,7 @@ pub type ProcessInstrumentationCallback = extern "system" fn(
     return_value: u64,
 );
 
+#[cfg(feature = "vectored_handlers")]
 #[rustfmt::skip]
 pub type VectoredExceptionHandler = extern "system" fn(
     exception_info: *mut ExceptionPointers,

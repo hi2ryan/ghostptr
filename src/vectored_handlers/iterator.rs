@@ -1,12 +1,12 @@
 use crate::{
     error::Result,
     vectored_handlers::{
-        entry::{VectoredHandlerEntry, RawVectoredHandlerEntry}, handler_type::VectoredHandlerType,
-        list::{VectoredHandlerList}, utils::decode_pointer,
+        entry::{RawVectoredHandlerEntry, VectoredHandlerEntry},
+        handler_type::VectoredHandlerType,
+        list::VectoredHandlerList,
+        utils::decode_pointer,
     },
-    windows::structs::{
-        ListEntry,
-    },
+    windows::structs::ListEntry,
 };
 use core::mem::offset_of;
 
@@ -19,16 +19,16 @@ pub struct VectoredHandlerIterator<'process, 'list> {
 }
 
 impl<'process, 'list> VectoredHandlerIterator<'process, 'list> {
-	/// Creates an iterator over all the vectored handlers of a [`VectoredHandlerType`].
-	///
-	/// # Arguments
-	/// - `list` The [`VectoredHandlerList`] of the process.
-	/// - `handler_type` The type of vectored handler.
+    /// Creates an iterator over all the vectored handlers of a [`VectoredHandlerType`].
+    ///
+    /// # Arguments
+    /// - `list` The [`VectoredHandlerList`] of the process.
+    /// - `handler_type` The type of vectored handler.
     pub fn new(
         list: &'list VectoredHandlerList<'process>,
         handler_type: VectoredHandlerType,
     ) -> Result<Self> {
-		let head = list.list_head_addr(handler_type) as *const ListEntry;
+        let head = list.list_head_addr(handler_type) as *const ListEntry;
         let current_addr = (head as usize + offset_of!(ListEntry, next))
             as *const *const ListEntry;
         let current = list.process.read_mem(current_addr)?;
@@ -56,17 +56,16 @@ impl<'process, 'list> Iterator
         let process = self.list.process;
 
         // read the entry
-        let raw_entry_addr = self.current as *const RawVectoredHandlerEntry;
-        let raw_entry = process
-            .read_mem(raw_entry_addr)
-            .ok()?;
+        let raw_entry_addr =
+            self.current as *const RawVectoredHandlerEntry;
+        let raw_entry = process.read_mem(raw_entry_addr).ok()?;
 
         self.current = raw_entry.list.next;
 
         // decode the encoded function address
         let handler_addr = decode_pointer(
             raw_entry.encoded_handler as usize,
-            self.list.cookie,
+            self.list.cookie(),
         );
 
         Some(VectoredHandlerEntry::from_raw_entry(

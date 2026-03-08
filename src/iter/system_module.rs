@@ -3,7 +3,7 @@ use crate::{
     windows::{
         constants::STATUS_INFO_LENGTH_MISMATCH,
         structs::{RtlProcessModuleInformation, RtlProcessModules},
-        wrappers::nt_query_system_information,
+        syscalls::stubs::nt_query_system_information,
     },
 };
 use core::ptr;

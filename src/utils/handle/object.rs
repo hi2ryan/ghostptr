@@ -3,9 +3,11 @@ use crate::{
     windows::{
         Handle,
         constants::{CURRENT_PROCESS_HANDLE, STATUS_INFO_LENGTH_MISMATCH},
-        structs::{ObjectBasicInformation, ProcessHandleEntry, PublicObjectTypeInformation, UnicodeString},
-        utils::unicode_to_string,
-        wrappers::{nt_duplicate_object, nt_query_object},
+        structs::{
+            ObjectBasicInformation, ProcessHandleEntry,
+            PublicObjectTypeInformation, UnicodeString,
+        },
+        syscalls::stubs::{nt_duplicate_object, nt_query_object},
     },
 };
 use core::{mem::zeroed, ptr};
@@ -29,30 +31,30 @@ use crate::process::ProcessHandleInfo;
 pub struct HandleObject(Handle);
 
 impl HandleObject {
-	/// Retrieves the underlying raw `Handle`.
-	#[inline(always)]
+    /// Retrieves the underlying raw `Handle`.
+    #[inline(always)]
     pub fn handle(&self) -> Handle {
         self.0
     }
 
-	/// Creates `HandleObject` from the raw `handle`.
-	#[inline(always)]
+    /// Creates `HandleObject` from the raw `handle`.
+    #[inline(always)]
     pub fn from_handle(handle: Handle) -> Self {
         Self(handle)
     }
 
-	/// Closes the handle.
-	#[inline(always)]
+    /// Closes the handle.
+    #[inline(always)]
     pub fn close(&self) -> Result<()> {
         close_handle(self.0)
     }
 
-	/// Creates a `SafeHandle` around the raw `Handle`,
-	/// consuming the `HandleObject`.
-	#[inline(always)]
-	pub fn to_safe(self) -> SafeHandle {
-		SafeHandle(self.0)
-	}
+    /// Creates a `SafeHandle` around the raw `Handle`,
+    /// consuming the `HandleObject`.
+    #[inline(always)]
+    pub fn to_safe(self) -> SafeHandle {
+        SafeHandle(self.0)
+    }
 
     /// Duplicates the handle.
     ///
@@ -60,8 +62,8 @@ impl HandleObject {
     /// like process access and thread access. Therefore, the desired access
     /// has been kept in its raw state as a `u32`. However, if the `access` is
     /// `None`, it will copy the handle's original access mask.
-	///
-	/// # Access Rights
+    ///
+    /// # Access Rights
     ///
     /// If the `src_process` is a remote process, this method
     /// requires the process handle access mask to include:
@@ -75,7 +77,11 @@ impl HandleObject {
     ///
     /// Returns [`ProcessError::NtStatus`] if duplicating the handle fails,
     /// potentially due to insufficient access rights.
-    pub fn duplicate(&self, src_process: &Process, access: Option<u32>) -> Result<Handle> {
+    pub fn duplicate(
+        &self,
+        src_process: &Process,
+        access: Option<u32>,
+    ) -> Result<Handle> {
         let mut new_handle = 0;
         let source_handle = unsafe { src_process.handle() };
 
@@ -96,7 +102,7 @@ impl HandleObject {
         }
     }
 
-	/// Retrieves the name of the object, if present.
+    /// Retrieves the name of the object, if present.
     ///
     /// The name can include path separators ("\\").
     pub fn name(&self) -> Result<String> {
@@ -114,11 +120,7 @@ impl HandleObject {
             return Err(ProcessError::NtStatus(status));
         }
 
-        let mut unicode_name = UnicodeString {
-            length: 0,
-            max_length: 0,
-            buffer: ptr::null_mut(),
-        };
+        let mut unicode_name = UnicodeString::default();
         let status = nt_query_object(
             self.0,
             0x1, // ObjectNameInformation
@@ -128,7 +130,7 @@ impl HandleObject {
         );
 
         match status {
-            0 => Ok(unicode_to_string(&unicode_name)),
+            0 => Ok(unicode_name.as_string_lossy()),
             _ => Err(ProcessError::NtStatus(status)),
         }
     }
@@ -162,8 +164,10 @@ impl HandleObject {
             return Err(ProcessError::NtStatus(status));
         }
 
-        let info = unsafe { &*(buf.as_ptr() as *const PublicObjectTypeInformation) };
-        Ok(unicode_to_string(&info.type_name))
+        let info = unsafe {
+            &*(buf.as_ptr() as *const PublicObjectTypeInformation)
+        };
+        Ok(info.type_name.as_string_lossy())
     }
 
     /// Retrieves the granted access mask of the object.
@@ -186,21 +190,21 @@ impl HandleObject {
 }
 
 impl From<HandleObject> for Handle {
-	#[inline(always)]
+    #[inline(always)]
     fn from(val: HandleObject) -> Self {
         val.0
     }
 }
 
 impl From<Handle> for HandleObject {
-	#[inline(always)]
+    #[inline(always)]
     fn from(value: Handle) -> Self {
         Self(value)
     }
 }
 
 impl From<ProcessHandleEntry> for HandleObject {
-	#[inline(always)]
+    #[inline(always)]
     fn from(value: ProcessHandleEntry) -> Self {
         Self(value.handle)
     }

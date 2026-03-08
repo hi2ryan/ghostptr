@@ -1,9 +1,8 @@
+use core::ptr;
+
 use crate::{
     constants::VIRTUAL_ADDRESS_RANGE,
-    windows::{
-        structs::LoaderDataTableEntry,
-        utils::{get_peb, unicode_to_string},
-    },
+    windows::{structs::LoaderDataTableEntry, utils::get_peb},
 };
 
 pub mod debug_privilege;
@@ -12,14 +11,14 @@ pub use debug_privilege::{
 };
 
 pub mod handle;
-pub mod ptr;
+pub mod pointer;
 
 pub use handle::{HandleObject, SafeHandle};
-pub use ptr::AsPointer;
+pub use pointer::AsPointer;
 
 use crate::{
     error::{ProcessError, Result},
-    windows::{Handle, wrappers::nt_close},
+    windows::{Handle, syscalls::stubs::nt_close},
 };
 
 pub type AddressRange = core::ops::Range<usize>;
@@ -34,8 +33,7 @@ pub fn close_handle(handle: Handle) -> Result<()> {
     }
 }
 
-/// Checks whether an `address` is within valid
-/// usermode virtual address bounds.
+/// Checks whether an `address` is within valid usermode virtual address bounds.
 #[inline]
 pub fn is_valid_address(address: usize) -> bool {
     VIRTUAL_ADDRESS_RANGE.contains(&address)
@@ -52,7 +50,7 @@ pub fn get_module_handle(name: Option<&str>) -> Option<*const u8> {
         let head = &(*ldr).in_memory_order_module_list;
         let mut current = head.next;
 
-        while current.cast_const() != head {
+        while ptr::eq(current, head) {
             let entry = (current as usize
                 - core::mem::offset_of!(
                     LoaderDataTableEntry,
@@ -60,15 +58,15 @@ pub fn get_module_handle(name: Option<&str>) -> Option<*const u8> {
                 )) as *const LoaderDataTableEntry;
 
             if let Some(name) = name {
-                let dll_name = unicode_to_string(&(*entry).base_dll_name);
-                if dll_name == name {
+                let dll_name = &(*entry).base_dll_name;
+                if dll_name.as_string_lossy() == name {
                     return Some((*entry).base_address);
                 }
 
-				current = (*current).next;
+                current = (*current).next;
             } else {
-				return Some((*entry).base_address);
-			}
+                return Some((*entry).base_address);
+            }
         }
 
         None

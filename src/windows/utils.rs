@@ -5,11 +5,11 @@ use crate::windows::constants::{
 };
 use crate::windows::structs::{
     ImageDosHeader, ImageExportDirectory, ImageNtHeaders64,
-    LoaderDataTableEntry, ProcessBasicInformation, UnicodeString,
+    LoaderDataTableEntry, ProcessBasicInformation,
 };
-use crate::windows::wrappers::nt_query_information_process;
+use crate::windows::syscalls::stubs::nt_query_information_process;
 use core::arch::asm;
-use core::slice::from_raw_parts;
+use core::ffi::CStr;
 
 type Handle = usize;
 
@@ -24,16 +24,6 @@ pub fn get_peb() -> *mut ProcessEnvBlock {
         );
         peb
     }
-}
-
-pub fn unicode_to_string(u: &UnicodeString) -> String {
-    if u.buffer.is_null() || u.length == 0 {
-        return String::new();
-    }
-
-    let slice =
-        unsafe { from_raw_parts(u.buffer, (u.length / 2) as usize) };
-    String::from_utf16_lossy(slice)
 }
 
 /// Retrieves the base address of ntdll.dll by
@@ -57,6 +47,11 @@ pub fn get_ntdll_base() -> *const u8 {
     }
 }
 
+/// Retrieves a procedure's address from a module's export directory by its FNV-1a hash.
+///
+/// # Arguments
+/// - `base` The base address of the target module.
+/// - `hash` The FNV-1a hash of the procedure name.
 pub fn get_export_by_hash(
     base: *const u8,
     hash: u32,
@@ -93,8 +88,9 @@ pub fn get_export_by_hash(
             let name_rva = *address_of_names.add(i as usize);
             let name_ptr = base.add(name_rva as usize);
 
-            let export_name = core::ffi::CStr::from_ptr(name_ptr.cast());
+            let export_name = CStr::from_ptr(name_ptr.cast());
             let export_hash = fnv1a_hash(export_name.to_bytes());
+
             if export_hash == hash {
                 let ordinal_index =
                     *address_of_name_ordinals.add(i as usize) as usize;

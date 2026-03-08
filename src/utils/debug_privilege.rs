@@ -3,7 +3,7 @@ use crate::{
     windows::{
         constants::CURRENT_PROCESS_HANDLE,
         structs::{Luid, LuidAndAttributes, TokenPrivileges},
-        wrappers::{nt_adjust_privileges_token, nt_close, nt_open_process_token},
+        syscalls::stubs::{nt_adjust_privileges_token, nt_close, nt_open_process_token},
     },
 };
 

@@ -1,21 +1,19 @@
 pub mod region;
 pub mod scan;
-pub mod thread;
 pub mod utils;
 
 #[cfg(feature = "vectored_handlers")]
 use crate::vectored_handlers::VectoredHandlerList;
 
 use crate::windows::{
-    ProcessInstrumentationCallback, flags::*,
+    ProcessInstrumentationCallback,
+    flags::*,
     structs::{ProcessEnvBlock, ProcessInstrumentationCallbackInfo},
-    wrappers::nt_set_information_process,
 };
 pub use region::MemoryRegionIter;
 pub use scan::MemScanIter;
-pub use thread::{Thread, WaitResult, QueuedUserAPCParameters};
 pub use utils::{
-    ExecutionTimes, MemoryAllocation, MemoryRegionInfo, ProcessHandleInfo,
+    ExecutionTimes, MemoryAllocation, MemoryRegion, ProcessHandleInfo,
 };
 
 use crate::{
@@ -23,6 +21,7 @@ use crate::{
     iter::{ModuleIterOrder, ModuleIterator, ProcessIterator, ThreadView},
     modules::Module,
     patterns::Scanner,
+    thread::Thread,
     utils::{AddressRange, AsPointer, SafeHandle},
     windows::{
         Handle, NtStatus,
@@ -32,14 +31,15 @@ use crate::{
             ObjectAttributes, ProcessHandleSnapshotInformation,
             UnicodeString,
         },
-        utils::{query_process_basic_info, query_process_handle_info},
-        wrappers::{
+        syscalls::stubs::{
             nt_allocate_virtual_memory, nt_close, nt_create_thread_ex,
             nt_duplicate_object, nt_free_virtual_memory, nt_open_process,
             nt_protect_virtual_memory, nt_query_information_process,
             nt_query_virtual_memory, nt_read_virtual_memory,
-            nt_terminate_process, nt_write_virtual_memory,
+            nt_set_information_process, nt_terminate_process,
+            nt_write_virtual_memory,
         },
+        utils::{query_process_basic_info, query_process_handle_info},
     },
 };
 
@@ -86,14 +86,7 @@ impl Process {
             unique_thread: 0,
         };
 
-        let mut attributes = ObjectAttributes {
-            length: size_of::<ObjectAttributes>() as u32,
-            root_directory: 0,
-            object_name: ptr::null_mut(),
-            attributes: 0,
-            security_descriptor: ptr::null_mut(),
-            security_quality_of_service: ptr::null_mut(),
-        };
+        let mut attributes = ObjectAttributes::default();
 
         let mut handle = 0;
         let status = nt_open_process(
@@ -119,13 +112,13 @@ impl Process {
     }
 
     /// Duplicates the underlying process handle, returning
-	/// a new [`Process`] struct.
+    /// a new [`Process`] struct.
     ///
-	/// This method requires an object access mask beyond standard bounds
+    /// This method requires an object access mask beyond standard bounds
     /// like process access and thread access. Therefore, the desired access
     /// has been kept in its raw state as a `u32`. However, if the `access` is
     /// `None`, it will copy the handle's original access mask.
-	///
+    ///
     /// # Access Rights
     ///
     /// This method requires the process handle access mask to include:
@@ -257,15 +250,15 @@ impl Process {
         query_process_basic_info(self.0).map(|info| info.pid as u32)
     }
 
-	/// Reads the Process Environment Block (PEB) of
-	/// the process.
-	///
-	/// # Access Rights
+    /// Reads the Process Environment Block (PEB) of
+    /// the process.
+    ///
+    /// # Access Rights
     ///
     /// If this is a remote process, this method requires
-	/// the following access rights:
+    /// the following access rights:
     ///
-	/// - [`ProcessAccess::VM_READ`], **or**
+    /// - [`ProcessAccess::VM_READ`], **or**
     /// - [`ProcessAccess::QUERY_INFORMATION`], **or**
     /// - [`ProcessAccess::QUERY_LIMITED_INFORMATION`]
     ///
@@ -275,7 +268,7 @@ impl Process {
     /// # Errors
     ///
     /// Returns [`ProcessError::NtStatus`] if querying basic process information
-	/// or reading the PEB fails, potentially due to insufficient access rights.
+    /// or reading the PEB fails, potentially due to insufficient access rights.
     ///
     /// # Example
     ///
@@ -284,18 +277,18 @@ impl Process {
     /// let peb = process.peb()?;
     /// println!("PEB is being debugged: {}", peb.being_debugged == 1);
     /// ```
-	pub fn peb(&self) -> Result<ProcessEnvBlock> {
-		let ptr = self.peb_ptr()?;
-		self.read_mem(ptr)
-	}
+    pub fn peb(&self) -> Result<ProcessEnvBlock> {
+        let ptr = self.peb_ptr()?;
+        self.read_mem(ptr)
+    }
 
-	/// Returns a pointer to the Process Environment Block (PEB) of
-	/// the process.
-	///
+    /// Returns a pointer to the Process Environment Block (PEB) of
+    /// the process.
+    ///
     /// # Access Rights
     ///
     /// If this is a remote process, this method requires
-	/// one of the following access rights:
+    /// one of the following access rights:
     ///
     /// - [`ProcessAccess::QUERY_INFORMATION`], **or**
     /// - [`ProcessAccess::QUERY_LIMITED_INFORMATION`]
@@ -315,10 +308,10 @@ impl Process {
     /// let peb_ptr = process.peb_ptr()?;
     /// println!("PEB: {:p}", peb_ptr);
     /// ```
-	#[inline]
-	pub fn peb_ptr(&self) -> Result<*mut ProcessEnvBlock> {
-		query_process_basic_info(self.0).map(|info| info.peb_base_address)
-	}
+    #[inline]
+    pub fn peb_ptr(&self) -> Result<*mut ProcessEnvBlock> {
+        query_process_basic_info(self.0).map(|info| info.peb_base_address)
+    }
 
     /// Returns the underlying process handle.
     ///
@@ -956,7 +949,7 @@ impl Process {
     pub fn query_mem(
         &self,
         address: impl AsPointer,
-    ) -> Result<MemoryRegionInfo> {
+    ) -> Result<MemoryRegion> {
         let mut memory_info: MaybeUninit<MemoryBasicInformation> =
             MaybeUninit::uninit();
 
@@ -974,7 +967,7 @@ impl Process {
         }
 
         let raw_info = unsafe { memory_info.assume_init() };
-        Ok(MemoryRegionInfo::from(raw_info))
+        Ok(MemoryRegion::from(raw_info))
     }
 
     /// Changes the protection on a region of virtual memory in the process.
@@ -1274,7 +1267,7 @@ impl Process {
         Ok(String::from_utf16_lossy(&buf))
     }
 
-	 /// Queries the process's cookie value.
+    /// Queries the process's cookie value.
     ///
     /// # Access Rights
     ///
@@ -1385,8 +1378,9 @@ mod tests {
             Process::open_first_named("Discord.exe", ProcessAccess::ALL)
                 .expect("failed to open remote process");
 
-        let duplicated =
-            process.duplicate(None).expect("failed to duplicate process");
+        let duplicated = process
+            .duplicate(None)
+            .expect("failed to duplicate process");
 
         // ensure that the handles aren't the same
         assert_ne!(unsafe { process.handle() }, unsafe {
@@ -1540,7 +1534,8 @@ mod tests {
             .nth(1)
             .expect("failed to get first module of remote process");
 
-        let nt_open_process_addr = ntdll.get_proc_address("NtOpenProcess")?;
+        let nt_open_process_addr =
+            ntdll.get_proc_address("NtOpenProcess")?;
 
         let ssn = crate::windows::syscalls::syscalls().nt_open_process;
         let ssn_bytes = ssn

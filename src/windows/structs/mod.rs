@@ -1,3 +1,9 @@
+mod string;
+pub use string::*;
+
+mod pe;
+pub use pe::*;
+
 use core::ptr;
 
 use crate::windows::{DllEntryPoint, Handle, NtStatus};
@@ -14,24 +20,6 @@ impl Default for ListEntry {
         Self {
             next: ptr::null_mut(),
             prev: ptr::null_mut(),
-        }
-    }
-}
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct UnicodeString {
-    pub length: u16,
-    pub max_length: u16,
-    pub buffer: *mut u16,
-}
-
-impl Default for UnicodeString {
-    fn default() -> Self {
-        Self {
-            length: 0,
-            max_length: 0,
-            buffer: ptr::null_mut(),
         }
     }
 }
@@ -512,14 +500,6 @@ pub struct DriveLetterCurrentDirectory {
 
 #[repr(C)]
 #[derive(Clone, Copy)]
-pub struct AnsiString {
-    pub length: u16,
-    pub max_length: u16,
-    pub buffer: *mut u8,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy)]
 pub struct ExceptionRegistrationRecord {
     pub next: *mut ExceptionRegistrationRecord,
     pub handler: *mut (),
@@ -978,140 +958,6 @@ pub struct AssemblyStorageMapEntry {
     pub handle: *mut (),
 }
 
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct ImageDosHeader {
-    pub e_magic: u16,
-    pub e_cblp: u16,
-    pub e_cp: u16,
-    pub e_crlc: u16,
-    pub e_cparhdr: u16,
-    pub e_minalloc: u16,
-    pub e_maxalloc: u16,
-    pub e_ss: u16,
-    pub e_sp: u16,
-    pub e_csum: u16,
-    pub e_ip: u16,
-    pub e_cs: u16,
-    pub e_lfarlc: u16,
-    pub e_ovno: u16,
-    pub e_res: [u16; 4],
-    pub e_oemid: u16,
-    pub e_oeminfo: u16,
-    pub e_res2: [u16; 10],
-    pub e_lfanew: u32,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct ImageDataDirectory {
-    pub virtual_address: u32,
-    pub size: u32,
-}
-
-#[repr(C)]
-#[derive(Copy, Clone)]
-pub struct ImageOptionalHeader64 {
-    pub magic: u16,
-    pub major_linker_version: u8,
-    pub minor_linker_version: u8,
-    pub size_of_code: u32,
-    pub size_of_initialized_data: u32,
-    pub size_of_uninitialized_data: u32,
-    pub address_of_entry_point: u32,
-    pub base_of_code: u32,
-    pub image_base: u64,
-    pub section_alignment: u32,
-    pub file_alignment: u32,
-    pub major_operating_system_version: u16,
-    pub minor_operating_system_version: u16,
-    pub major_image_version: u16,
-    pub minor_image_version: u16,
-    pub major_subsystem_version: u16,
-    pub minor_subsystem_version: u16,
-    pub win32_version_value: u32,
-    pub size_of_image: u32,
-    pub size_of_headers: u32,
-    pub checksum: u32,
-    pub subsystem: u16,
-    pub dll_characteristics: u16,
-    pub size_of_stack_reserve: u64,
-    pub size_of_stack_commit: u64,
-    pub size_of_heap_reserve: u64,
-    pub size_of_heap_commit: u64,
-    pub loader_flags: u32,
-    pub number_of_rva_and_sizes: u32,
-    pub data_directory: [ImageDataDirectory; 16],
-}
-
-#[repr(C)]
-#[derive(Copy, Clone)]
-pub struct ImageFileHeader {
-    pub machine: u16,
-    pub number_of_sections: u16,
-    pub time_date_stamp: u32,
-    pub pointer_to_symbol_table: u32,
-    pub number_of_symbols: u32,
-    pub size_of_optional_header: u16,
-    pub characteristics: u16,
-}
-
-#[repr(C)]
-#[derive(Copy, Clone)]
-pub struct ImageNtHeaders64 {
-    pub signature: u32,
-    pub file_header: ImageFileHeader,
-    pub optional_header: ImageOptionalHeader64,
-}
-
-#[repr(C)]
-#[derive(Copy, Clone)]
-pub union ImageSectionHeaderMisc {
-    pub physical_address: u32,
-    pub virtual_size: u32,
-}
-
-#[repr(C)]
-#[derive(Copy, Clone)]
-pub struct ImageSectionHeader {
-    pub name: [u8; 8],
-    pub misc: ImageSectionHeaderMisc,
-    pub virtual_address: u32,
-    pub size_of_raw_data: u32,
-    pub pointer_to_raw_data: u32,
-    pub pointer_to_relocations: u32,
-    pub pointer_to_linenumbers: u32,
-    pub number_of_relocations: u16,
-    pub number_of_linenumbers: u16,
-    pub characteristics: u32,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct ImageExportDirectory {
-    pub characteristics: u32,
-    pub time_date_stamp: u32,
-    pub major_version: u16,
-    pub minor_version: u16,
-    pub name: u32,
-    pub base: u32,
-    pub number_of_functions: u32,
-    pub number_of_names: u32,
-    pub address_of_functions: u32,
-    pub address_of_names: u32,
-    pub address_of_name_ordinals: u32,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct ImageImportDescriptor {
-    pub original_first_thunk: u32,
-    pub time_date_stamp: u32,
-    pub forwarder_chain: u32,
-    pub name: u32,
-    pub first_thunk: u32,
-}
-
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ThreadState {
@@ -1245,6 +1091,19 @@ pub struct ObjectAttributes {
     pub attributes: u32,
     pub security_descriptor: *mut (),
     pub security_quality_of_service: *mut (),
+}
+
+impl Default for ObjectAttributes {
+    fn default() -> Self {
+        Self {
+            length: size_of::<ObjectAttributes>() as u32,
+            root_directory: 0,
+            object_name: ptr::null_mut(),
+            attributes: 0,
+            security_descriptor: ptr::null_mut(),
+            security_quality_of_service: ptr::null_mut(),
+        }
+    }
 }
 
 #[repr(C)]
@@ -1421,9 +1280,7 @@ pub struct PublicObjectTypeInformation {
 pub struct PsAttribute {
     pub attribute: usize,
     pub size: usize,
-
     pub value: usize,
-
     pub return_length: *mut usize,
 }
 
@@ -1521,6 +1378,7 @@ pub struct Luid {
 }
 
 #[repr(C)]
+#[derive(Clone, Copy)]
 pub struct SRWLock {
     pub value: usize,
 }
@@ -1546,6 +1404,7 @@ pub struct RtlVectoredHandlerEntry {
 }
 
 #[repr(C)]
+#[derive(Clone, Copy)]
 pub struct ExceptionPointers {
     pub exception_record: *mut ExceptionRecord,
     pub context_record: *mut ThreadContext,

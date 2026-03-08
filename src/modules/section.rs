@@ -26,7 +26,7 @@ pub struct Section<'process, 'module> {
     /// The section characteristics flags.
     pub characteristics: SectionCharacteristics,
 
-	/// The size of the initialized data on disk, in bytes. 
+	/// The size of the initialized data on disk, in bytes.
 	pub raw_data_size: u32,
 
 	/// A file pointer to the first page.
@@ -35,14 +35,14 @@ pub struct Section<'process, 'module> {
 
 impl<'process, 'module> Section<'process, 'module> {
     /// Returns the virtual address range covered by this module section.
-    #[inline(always)]
+    #[inline]
     pub fn virtual_range(&self) -> AddressRange {
         let end = self.address.saturating_add(self.size as usize);
         self.address..end
     }
 
     /// Checks whether an address lies within the virtual address range of this section.
-    #[inline(always)]
+    #[inline]
     pub fn contains(&self, address: &usize) -> bool {
         self.virtual_range().contains(address)
     }
@@ -57,7 +57,7 @@ impl<'process, 'module> Section<'process, 'module> {
     }
 
     /// Returns an iterator over the memory regions that intersect this section.
-    #[inline(always)]
+    #[inline]
     pub fn mem_regions(&self) -> MemoryRegionIter<'process> {
         MemoryRegionIter::new(self.module.process, self.virtual_range())
     }

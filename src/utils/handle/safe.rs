@@ -1,6 +1,6 @@
 use core::{fmt::Debug, mem::ManuallyDrop, ops::Deref};
 
-use crate::windows::{Handle, wrappers::nt_close};
+use crate::windows::{Handle, syscalls::stubs::nt_close};
 use super::HandleObject;
 
 /// A wrapper around a `Handle` which closes the handle once
@@ -11,7 +11,7 @@ pub struct SafeHandle(pub Handle);
 impl SafeHandle {
     /// Consumes the [`SafeHandle`] and returns the a [`HandleObject`] containing
 	/// the underlying handle.
-    #[inline(always)]
+    #[inline]
     pub fn to_object(self) -> HandleObject {
 		let safe_handle = ManuallyDrop::new(self);
         HandleObject::from_handle(safe_handle.0)
@@ -19,7 +19,7 @@ impl SafeHandle {
 }
 
 impl From<Handle> for SafeHandle {
-	#[inline(always)]
+	#[inline]
     fn from(value: Handle) -> Self {
         Self(value)
     }
@@ -34,7 +34,7 @@ impl Debug for SafeHandle {
 impl Deref for SafeHandle {
     type Target = Handle;
 
-	#[inline(always)]
+	#[inline]
     fn deref(&self) -> &Self::Target {
         &self.0
     }

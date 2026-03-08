@@ -25,10 +25,11 @@ pub mod iter;
 pub mod modules;
 pub mod patterns;
 pub mod process;
+pub mod thread;
 pub mod utils;
 
 #[cfg(feature = "expose_syscalls")]
-pub use windows::syscalls::{extract_syscall_id, syscalls};
+pub use windows::syscalls::{extract_syscall_id, stubs::*, syscalls};
 
 #[cfg(feature = "vectored_handlers")]
 pub mod vectored_handlers;
@@ -44,13 +45,15 @@ pub use iter::{
     ModuleIterOrder, ModuleIterator, ProcessIterator, ProcessView,
     SystemModuleIterator, SystemModuleView, ThreadView,
 };
-pub use modules::{Export, Import, ImportType, Module, Section, ModuleLoadReason};
+pub use modules::{
+    Export, Import, ImportType, Module, ModuleLoadReason, Section,
+};
 pub use patterns::{Pattern16, Pattern32, Scanner};
 pub use process::{
-    ExecutionTimes, MemScanIter, MemoryAllocation, MemoryRegionInfo,
-    MemoryRegionIter, Process, ProcessHandleInfo, QueuedUserAPCParameters,
-    Thread, WaitResult,
+    ExecutionTimes, MemScanIter, MemoryAllocation, MemoryRegion,
+    MemoryRegionIter, Process, ProcessHandleInfo,
 };
+pub use thread::{QueuedUserAPCParameters, Thread, WaitResult};
 pub use utils::{
     AddressRange, AsPointer, DebugPrivilegeGuard, HandleObject,
     SafeHandle, close_handle, disable_debug_privilege,

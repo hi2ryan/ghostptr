@@ -1,16 +1,15 @@
 pub mod export;
 pub mod import;
-pub mod section;
 mod load_reason;
+pub mod section;
 
-pub use export::{Export, ExportIterator};
+pub use export::{Export, ExportForwarder, ExportIterator, ForwardMethod};
 pub use import::{Import, ImportType};
 pub use load_reason::ModuleLoadReason;
 pub use section::Section;
 
 use crate::{
     MemScanIter, ProcessError, Result, Scanner, SectionCharacteristics,
-    modules::export::{ExportForwarder, ForwardedBy},
     process::{MemoryRegionIter, Process},
     utils::AddressRange,
     windows::{
@@ -65,7 +64,7 @@ impl<'process> Module<'process> {
     /// let range = module.virtual_range();
     /// println!("module is from {:#X} to {:#X}", range.start, range.end);
     /// ```
-    #[inline(always)]
+    #[inline]
     pub fn virtual_range(&self) -> AddressRange {
         self.base_address..(self.base_address + self.image_size as usize)
     }
@@ -79,7 +78,7 @@ impl<'process> Module<'process> {
     /// let is_contained = module.contains(&address);
     /// println!("is offset inside module: {}", is_contained);
     /// ```
-    #[inline(always)]
+    #[inline]
     pub fn contains(&self, address: &usize) -> bool {
         self.virtual_range().contains(address)
     }
@@ -94,7 +93,7 @@ impl<'process> Module<'process> {
     ///     println!("{:#X}", data);
     /// }
     /// ```
-    #[inline(always)]
+    #[inline]
     pub fn offset(&self, rva: usize) -> usize {
         self.base_address + rva
     }
@@ -110,7 +109,7 @@ impl<'process> Module<'process> {
     ///     println!("pattern hit at {:#X} | offset: {}", address, offset);
     /// }
     /// ```
-    #[inline(always)]
+    #[inline]
     pub fn scan_mem<'scanner, S: Scanner>(
         &self,
         scanner: &'scanner S,
@@ -126,7 +125,7 @@ impl<'process> Module<'process> {
     ///     println!("region {:#X} has size {:#X}", region.base_address, region.size)
     /// }
     /// ```
-    #[inline(always)]
+    #[inline]
     pub fn mem_regions(&self) -> MemoryRegionIter<'process> {
         MemoryRegionIter::new(self.process, self.virtual_range())
     }
@@ -176,12 +175,12 @@ impl<'process> Module<'process> {
     /// let flags = module.flags();
     /// println!("Raw loader flags: {:#034b}", flags);
     /// ```
-    #[inline(always)]
+    #[inline]
     pub fn flags(&self) -> u32 {
         self.flags
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn process(&self) -> &'process Process {
         self.process
     }
@@ -193,8 +192,7 @@ impl<'process> Module<'process> {
     /// ordinal-only exports are included.
     ///
     /// # Errors
-    /// - [`ProcessError::MalformedPE`] if the module appears to have
-    ///   invalid PE headers.
+    /// - [`ProcessError::MalformedPE`] if the module appears to have invalid PE headers.
     /// - [`ProcessError::NoExportDirectory`] if the module appears to have no
     ///   export directory (rva = 0).
     /// - [`ProcessError::NtStatus`] if reading memory fails.
@@ -218,8 +216,8 @@ impl<'process> Module<'process> {
     ///
     /// # Errors
     ///
-    /// - [`ProcessError::MalformedPE`] if the export directory cannot be located.
-    /// - [`ProcessError::ExportNotFound`] if no export with the given name exists in this module.
+    /// - [`ProcessError::MalformedPE`] if the module appears to have invalid PE headers.
+    /// - [`ProcessError::NoExportDirectory`] if the module appears to have no export directory (rva = 0).
     /// - [`ProcessError::NtStatus`] if reading memory fails.
     ///
     /// # Example
@@ -311,7 +309,8 @@ impl<'process> Module<'process> {
     ///
     /// # Errors
     ///
-    /// - [`ProcessError::MalformedPE`] if the export directory cannot be located.
+    /// - [`ProcessError::MalformedPE`] if the module appears to have invalid PE headers.
+    /// - [`ProcessError::NoExportDirectory`] if the module appears to have no export directory (rva = 0).
     /// - [`ProcessError::ExportNotFound`] if no export with the given name exists in this module.
     /// - [`ProcessError::NtStatus`] if reading memory fails.
     ///
@@ -370,6 +369,9 @@ impl<'process> Module<'process> {
     }
 
     /// Looks up an exported procedure by name and returns its address.
+	///
+	/// # Arguments
+	/// - `name` The name of the exported procedure.
     pub fn get_proc_address(&self, name: &str) -> Result<usize> {
         self.get_export(name).map(|export| export.address)
     }
@@ -536,7 +538,7 @@ impl<'process> Module<'process> {
     /// Parses all the image section headers of the module and
     /// searches for a matching section name.
     ///
-    /// /// # Errors
+    /// # Errors
     /// - [`ProcessError::SectionNotFound`] if the section is not found.
     /// - [`ProcessError::NtStatus`] if reading memory fails.
     ///
@@ -556,6 +558,18 @@ impl<'process> Module<'process> {
         } else {
             Err(ProcessError::SectionNotFound(name.to_owned()))
         }
+    }
+
+	/// Returns the ordinal base of the PE module's image export directory.
+	/// The ordinal base is the starting ordinal number for exported functions.
+	///
+	/// # Errors
+	/// - [`ProcessError::MalformedPE`] if the module appears to have invalid PE headers.
+    /// - [`ProcessError::NoExportDirectory`] if the module appears to have no export directory (rva = 0).
+    /// - [`ProcessError::NtStatus`] if reading memory fails.
+	pub fn ordinal_base(&self) -> Result<u32> {
+        self.export_directory()
+            .map(|(_, export_dir)| export_dir.base)
     }
 
     fn nt_headers(&self) -> Result<usize> {
@@ -644,32 +658,31 @@ impl<'process> Module<'process> {
         let imported_module =
             self.process.get_module(&module_name).ok()?;
 
-        if let Some(ordinal_str) = forwarded_to.strip_prefix("#") {
+        // get forwarded export
+        let (export, method) = if let Some(ordinal_str) =
+            forwarded_to.strip_prefix("#")
+        {
             let ordinal: u16 = ordinal_str.parse().ok()?;
-            let address = imported_module
-                .get_export_by_ordinal(ordinal)
-                .ok()?
-                .address;
+            let export = Box::new(
+                imported_module.get_export_by_ordinal(ordinal).ok()?,
+            );
 
-            Some((
-                ExportForwarder {
-                    dll: module_name,
-                    export: ForwardedBy::Ordinal(ordinal),
-                },
-                address,
-            ))
+            (export, ForwardMethod::Ordinal)
         } else {
-            let address =
-                imported_module.get_export(forwarded_to).ok()?.address;
+            let export =
+                Box::new(imported_module.get_export(forwarded_to).ok()?);
 
-            Some((
-                ExportForwarder {
-                    dll: module_name,
-                    export: ForwardedBy::Name(forwarded_to.to_owned()),
-                },
-                address,
-            ))
-        }
+            (export, ForwardMethod::Name)
+        };
+
+        let forwarded_to = export.address;
+        let forwarder = ExportForwarder {
+            dll: module_name,
+            export,
+            method,
+        };
+
+        Some((forwarder, forwarded_to))
     }
 
     pub(crate) fn resolve_exports(

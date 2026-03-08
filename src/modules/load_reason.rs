@@ -28,68 +28,45 @@ pub enum ModuleLoadReason {
 }
 
 impl ModuleLoadReason {
-	/// Returns the raw `LdrDllLoadReason` value ([`i32`]).
+    /// Returns the raw `LdrDllLoadReason` value ([`i32`]).
     pub fn as_raw(&self) -> i32 {
         LdrDllLoadReason::from(*self) as i32
     }
 }
 
-impl From<LdrDllLoadReason> for ModuleLoadReason {
-    fn from(reason: LdrDllLoadReason) -> Self {
-        match reason {
-            LdrDllLoadReason::Unknown => ModuleLoadReason::Unknown,
-            LdrDllLoadReason::StaticDependency => {
-                ModuleLoadReason::StaticDependency
+macro_rules! bidirectional_from {
+    ($a:ty, $b:ty, [$($variant:ident),* $(,)?]) => {
+        impl From<$b> for $a {
+            fn from(value: $b) -> Self {
+                match value {
+                    $(<$b>::$variant => <$a>::$variant,)*
+                }
             }
-            LdrDllLoadReason::StaticForwarderDependency => {
-                ModuleLoadReason::StaticForwarderDependency
-            }
-            LdrDllLoadReason::DynamicForwarderDependency => {
-                ModuleLoadReason::DynamicForwarderDependency
-            }
-            LdrDllLoadReason::DelayloadDependency => {
-                ModuleLoadReason::DelayloadDependency
-            }
-            LdrDllLoadReason::DynamicLoad => ModuleLoadReason::DynamicLoad,
-            LdrDllLoadReason::AsImageLoad => ModuleLoadReason::AsImageLoad,
-            LdrDllLoadReason::AsDataLoad => ModuleLoadReason::AsDataLoad,
-            LdrDllLoadReason::EnclavePrimary => {
-                ModuleLoadReason::EnclavePrimary
-            }
-            LdrDllLoadReason::EnclaveDependency => {
-                ModuleLoadReason::EnclaveDependency
-            }
-            LdrDllLoadReason::PatchImage => ModuleLoadReason::PatchImage,
         }
-    }
+        impl From<$a> for $b {
+            fn from(value: $a) -> Self {
+                match value {
+                    $(<$a>::$variant => <$b>::$variant,)*
+                }
+            }
+        }
+    };
 }
 
-impl From<ModuleLoadReason> for LdrDllLoadReason {
-    fn from(reason: ModuleLoadReason) -> Self {
-        match reason {
-            ModuleLoadReason::Unknown => LdrDllLoadReason::Unknown,
-            ModuleLoadReason::StaticDependency => {
-                LdrDllLoadReason::StaticDependency
-            }
-            ModuleLoadReason::StaticForwarderDependency => {
-                LdrDllLoadReason::StaticForwarderDependency
-            }
-            ModuleLoadReason::DynamicForwarderDependency => {
-                LdrDllLoadReason::DynamicForwarderDependency
-            }
-            ModuleLoadReason::DelayloadDependency => {
-                LdrDllLoadReason::DelayloadDependency
-            }
-            ModuleLoadReason::DynamicLoad => LdrDllLoadReason::DynamicLoad,
-            ModuleLoadReason::AsImageLoad => LdrDllLoadReason::AsImageLoad,
-            ModuleLoadReason::AsDataLoad => LdrDllLoadReason::AsDataLoad,
-            ModuleLoadReason::EnclavePrimary => {
-                LdrDllLoadReason::EnclavePrimary
-            }
-            ModuleLoadReason::EnclaveDependency => {
-                LdrDllLoadReason::EnclaveDependency
-            }
-            ModuleLoadReason::PatchImage => LdrDllLoadReason::PatchImage,
-        }
-    }
-}
+bidirectional_from!(
+    ModuleLoadReason,
+    LdrDllLoadReason,
+    [
+        Unknown,
+        StaticDependency,
+        StaticForwarderDependency,
+        DynamicForwarderDependency,
+        DelayloadDependency,
+        DynamicLoad,
+        AsImageLoad,
+        AsDataLoad,
+        EnclavePrimary,
+        EnclaveDependency,
+        PatchImage,
+    ]
+);

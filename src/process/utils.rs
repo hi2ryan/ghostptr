@@ -1,7 +1,9 @@
 use crate::{
     AllocationType, ProcessError, Result,
-    process::{FreeType, MemoryProtection, MemoryState, MemoryType, Process},
-	utils::AddressRange,
+    process::{
+        FreeType, MemoryProtection, MemoryState, MemoryType, Process,
+    },
+    utils::AddressRange,
     windows::{
         Handle,
         constants::{CURRENT_PROCESS_HANDLE, STATUS_INFO_LENGTH_MISMATCH},
@@ -9,11 +11,10 @@ use crate::{
             KernelUserTimes, MemoryBasicInformation, ProcessHandleEntry,
             PublicObjectTypeInformation, UnicodeString,
         },
-        utils::unicode_to_string,
-        wrappers::{nt_duplicate_object, nt_query_object},
+        syscalls::stubs::{nt_duplicate_object, nt_query_object},
     },
 };
-use core::{ptr, time::Duration};
+use core::time::Duration;
 
 #[derive(Debug)]
 pub struct ExecutionTimes {
@@ -33,17 +34,25 @@ pub struct ExecutionTimes {
 impl From<KernelUserTimes> for ExecutionTimes {
     fn from(value: KernelUserTimes) -> Self {
         Self {
-            created_at: Duration::from_nanos(value.create_time.max(0) as u64 * 100),
-            exited_at: Duration::from_nanos(value.exit_time.max(0) as u64 * 100),
-            kernel_time: Duration::from_nanos(value.kernel_time.max(0) as u64 * 100),
-            user_time: Duration::from_nanos(value.user_time.max(0) as u64 * 100),
+            created_at: Duration::from_nanos(
+                value.create_time.max(0) as u64 * 100,
+            ),
+            exited_at: Duration::from_nanos(
+                value.exit_time.max(0) as u64 * 100,
+            ),
+            kernel_time: Duration::from_nanos(
+                value.kernel_time.max(0) as u64 * 100,
+            ),
+            user_time: Duration::from_nanos(
+                value.user_time.max(0) as u64 * 100,
+            ),
         }
     }
 }
 
 /// Represents queried information regarding region of virtual memory.
 #[derive(Debug, Clone)]
-pub struct MemoryRegionInfo {
+pub struct MemoryRegion {
     /// The starting virtual address of this region.
     pub base_address: usize,
 
@@ -73,7 +82,7 @@ pub struct MemoryRegionInfo {
     pub mem_type: MemoryType,
 }
 
-impl MemoryRegionInfo {
+impl MemoryRegion {
     /// Returns `true` if this region is accessible.
     ///
     /// A region is considered accessible if:
@@ -85,9 +94,9 @@ impl MemoryRegionInfo {
     #[inline(always)]
     pub fn is_accessible(&self) -> bool {
         self.state.contains(MemoryState::COMMIT)
-            && !self
-                .protection
-                .intersects(MemoryProtection::NOACCESS | MemoryProtection::GUARD)
+            && !self.protection.intersects(
+                MemoryProtection::NOACCESS | MemoryProtection::GUARD,
+            )
     }
 
     /// Returns `true` if this region can be safely read from.
@@ -130,13 +139,15 @@ impl MemoryRegionInfo {
     }
 }
 
-impl From<MemoryBasicInformation> for MemoryRegionInfo {
+impl From<MemoryBasicInformation> for MemoryRegion {
     #[inline(always)]
     fn from(value: MemoryBasicInformation) -> Self {
         Self {
             base_address: value.base_address as _,
             allocation_base: value.allocation_base as _,
-            allocation_protection: MemoryProtection::from_bits(value.allocation_protection),
+            allocation_protection: MemoryProtection::from_bits(
+                value.allocation_protection,
+            ),
             partition_id: value.partition_id,
             size: value.region_size,
             state: MemoryState::from_bits(value.state),
@@ -218,11 +229,7 @@ impl<'process> ProcessHandleInfo<'process> {
             return Err(ProcessError::NtStatus(status));
         }
 
-        let mut unicode_name = UnicodeString {
-            length: 0,
-            max_length: 0,
-            buffer: ptr::null_mut(),
-        };
+        let mut unicode_name = UnicodeString::default();
         let status = nt_query_object(
             self.handle,
             0x1, // ObjectNameInformation
@@ -232,7 +239,7 @@ impl<'process> ProcessHandleInfo<'process> {
         );
 
         match status {
-            0 => Ok(unicode_to_string(&unicode_name)),
+            0 => Ok(unicode_name.as_string_lossy()),
             _ => Err(ProcessError::NtStatus(status)),
         }
     }
@@ -266,8 +273,10 @@ impl<'process> ProcessHandleInfo<'process> {
             return Err(ProcessError::NtStatus(status));
         }
 
-        let info = unsafe { &*(buf.as_ptr() as *const PublicObjectTypeInformation) };
-        Ok(unicode_to_string(&info.type_name))
+        let info = unsafe {
+            &*(buf.as_ptr() as *const PublicObjectTypeInformation)
+        };
+        Ok(info.type_name.as_string_lossy())
     }
 
     #[inline(always)]
